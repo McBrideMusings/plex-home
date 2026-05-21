@@ -57,10 +57,12 @@ Special entries have `start_date`, `end_date` (both `MM-DD`), and `collection_na
 | File | Purpose |
 |------|---------|
 | `config.py` | New config loader — parses and validates the YAML config into typed dataclasses |
+| `eligibility.py` | Group eligibility engine — evaluates date/time constraints and applies include/exclude/min-items filters |
 | `plex_client.py` | Plex data-access layer — connects to PlexServer, fetches collections per library as CollectionInfo objects |
 | `history.py` | Repeat-block history — tracks pinned collections with timestamps, answers "is this blocked?" |
 | `test_config.py` | Pytest suite for config loader (run with `.venv/bin/pytest`) |
 | `test_history.py` | Pytest suite for repeat-block history |
+| `test_eligibility.py` | Pytest suite for group eligibility engine |
 | `test_plex_client.py` | Pytest suite for Plex client (fully mocked) |
 | `ColleXions.py` | Original script (reference only — being superseded by the rewrite) |
 | `config.json` | Runtime configuration (not committed with real credentials) |
