@@ -1,0 +1,32 @@
+# plex-home
+
+Declarative Plex home-screen manager. Defines an ordered list of slots; each slot resolves to a pinned collection hub at runtime. Fully manages the home screen — the config is the source of truth.
+
+## Language
+
+### Domain
+
+- **Pin / Pinned** — Plex's own term for promoting a collection to the home screen. Use `pin`/`pinned` in code and docs; avoid `promote`/`promoted` (Plex's internal API field name).
+- **Hub** — Plex's term for a home-screen row. A pinned collection becomes a hub. System hubs (Recently Added, Continue Watching, On Deck) are Plex-managed and distinct from user collection hubs.
+- **Collection** — A user-created or library-auto-generated grouping of media items. Can be pinned as a hub. Distinct from system hubs.
+- **Slot** — One position in the declared home screen layout. Either fixed (always resolves to a named collection) or a `pick:` (resolves via group priority).
+- **Group** — A named pool of collections with optional constraints (date range, time range, label filters, name filters). Groups are referenced by slots. A group is *eligible* when all its constraints pass.
+- **Pick** — A slot type that tries an ordered list of groups sequentially; the first eligible group that yields a collection fills the slot. If no group resolves, the slot is skipped.
+- **Cycle** — One full run of the script: resolve all slots → pin resolved set → unpin anything not in resolved set → enforce hub ordering via Move Hub API.
+- **Repeat block** — A recency window (`repeat_block_hours`) that prevents the same collection from being picked again within N hours. Bypassable per group with `repeat_block_hours: 0`.
+- **Seasonal group** — A group with a `date:` constraint that makes it eligible only during a specific annual date range (e.g. Oct 1–31 for Halloween content). Previously called "special collections" in the original codebase — avoid that term.
+
+### Architecture
+
+{Seeded on first run of `improve-codebase-architecture`.}
+
+## Relationships
+
+- A **slot** references one or more **groups** (via `pick:`) or a specific collection name directly.
+- A **group** filters the **collection** pool from one library using labels and/or explicit names.
+- A **cycle** resolves all slots, then calls the Plex API to pin and reorder the resulting hubs.
+
+## Flagged ambiguities
+
+- **"Special collections"** (original codebase term) — means date-range-gated priority collections. Replaced by the **seasonal group** pattern in this codebase. Do not use "special collections."
+- **Cross-library collections** — whether same-named collections across libraries can appear as a single merged hub is unverified. Tracked in spike issue.
