@@ -57,7 +57,9 @@ Special entries have `start_date`, `end_date` (both `MM-DD`), and `collection_na
 | File | Purpose |
 |------|---------|
 | `config.py` | New config loader — parses and validates the YAML config into typed dataclasses |
+| `history.py` | Repeat-block history — tracks pinned collections with timestamps, answers "is this blocked?" |
 | `test_config.py` | Pytest suite for config loader (run with `.venv/bin/pytest`) |
+| `test_history.py` | Pytest suite for repeat-block history |
 | `ColleXions.py` | Original script (reference only — being superseded by the rewrite) |
 | `config.json` | Runtime configuration (not committed with real credentials) |
 | `requirements.txt` | Python dependencies (`plexapi`, `requests`, plus unused stubs) |
