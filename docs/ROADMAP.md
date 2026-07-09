@@ -2,12 +2,12 @@
 
 ## Now
 
-- [ ] YAML config loader and schema validator
-- [ ] Group eligibility engine (date range, time range, label filters, name filters)
-- [ ] Slot resolver (fixed slots, pick slots with sequential group priority)
-- [ ] Repeat-block history (local JSON, global + per-group override)
-- [ ] Min-items threshold (global + per-group override)
-- [ ] Plex collection fetcher (per library, with label and name filtering)
+- [x] YAML config loader and schema validator
+- [x] Group eligibility engine (date range, time range, label filters, name filters)
+- [x] Slot resolver (fixed slots, pick slots with sequential group priority)
+- [x] Repeat-block history (local JSON, global + per-group override)
+- [x] Min-items threshold (global + per-group override)
+- [x] Plex collection fetcher (per library, with label and name filtering)
 - [ ] Pin/unpin engine (fully-managed: pin resolved set, unpin everything else)
 - [ ] Hub ordering via Move Hub API
 

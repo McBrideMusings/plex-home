@@ -34,13 +34,19 @@ def save_history(history: dict[str, datetime]) -> None:
     HISTORY_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def is_blocked(title: str, history: dict[str, datetime], repeat_block_hours: float) -> bool:
+def is_blocked(
+    title: str,
+    history: dict[str, datetime],
+    repeat_block_hours: float,
+    now: datetime | None = None,
+) -> bool:
     if repeat_block_hours == 0:
         return False
     last_pinned = history.get(title)
     if last_pinned is None:
         return False
-    now = datetime.now(tz=timezone.utc)
+    if now is None:
+        now = datetime.now(tz=timezone.utc)
     age_hours = (now - last_pinned).total_seconds() / 3600
     return age_hours < repeat_block_hours
 
