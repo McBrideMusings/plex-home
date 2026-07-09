@@ -62,12 +62,14 @@ Special entries have `start_date`, `end_date` (both `MM-DD`), and `collection_na
 | `history.py` | Repeat-block history — tracks pinned collections with timestamps, answers "is this blocked?" |
 | `resolver.py` | Slot resolver — walks configured home slots, resolves fixed + pick slots (sequential group priority), dedups across slots |
 | `pinning.py` | Pin/unpin engine — fully manages the home screen (ADR-0002): pins resolved collections, unpins everything else, updates repeat-block history |
+| `ordering.py` | Hub ordering — reorders home-screen managed hubs to match the resolved slot order via the Plex Move Hub API (`ManagedHub.move`) |
 | `test_config.py` | Pytest suite for config loader (run with `.venv/bin/pytest`) |
 | `test_history.py` | Pytest suite for repeat-block history |
 | `test_eligibility.py` | Pytest suite for group eligibility engine |
 | `test_plex_client.py` | Pytest suite for Plex client (fully mocked) |
 | `test_resolver.py` | Pytest suite for slot resolver |
 | `test_pinning.py` | Pytest suite for pin/unpin engine (fully mocked) |
+| `test_ordering.py` | Pytest suite for hub ordering (fully mocked) |
 | `ColleXions.py` | Original script (reference only — being superseded by the rewrite) |
 | `config.json` | Runtime configuration (not committed with real credentials) |
 | `requirements.txt` | Python dependencies (`plexapi`, `requests`, plus unused stubs) |
