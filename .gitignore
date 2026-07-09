@@ -1,5 +1,5 @@
-# Local Claude notes
-.claude/*.local.md
+# Local Claude config and notes
+.claude/
 
 # Python
 .venv/

@@ -10,23 +10,30 @@ from eligibility import eligible_collections
 
 log = logging.getLogger(__name__)
 
+_default_rng = random.Random()
+
 
 def resolve_slots(
     config: Config,
     all_collections: dict[str, list[CollectionInfo]],
     history: dict[str, datetime],
     now: datetime,
+    rng: random.Random | None = None,
 ) -> list[str]:
+    if rng is None:
+        rng = _default_rng
     used: set[str] = set()
     resolved: list[str] = []
 
     for slot in config.home:
         if isinstance(slot, FixedSlot):
+            if slot.collection in used:
+                continue
             resolved.append(slot.collection)
             used.add(slot.collection)
 
         elif isinstance(slot, PickSlot):
-            picked = _resolve_pick(slot, config, all_collections, history, used, now)
+            picked = _resolve_pick(slot, config, all_collections, history, used, now, rng)
             if picked is not None:
                 resolved.append(picked)
                 used.add(picked)
@@ -41,6 +48,7 @@ def _resolve_pick(
     history: dict[str, datetime],
     used: set[str],
     now: datetime,
+    rng: random.Random,
 ) -> str | None:
     for group_name in slot.groups:
         group = config.groups[group_name]
@@ -56,7 +64,7 @@ def _resolve_pick(
         if not available:
             continue
 
-        chosen = random.choice(available)
+        chosen = rng.choice(available)
         log.info("Slot pick: group %r → %r", group_name, chosen.title)
         return chosen.title
 

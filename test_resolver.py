@@ -1,3 +1,4 @@
+import random
 import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch
@@ -138,6 +139,22 @@ def test_per_group_repeat_block_override():
     colls = {"Movies": [coll("Movie A")]}
     result = resolve_slots(cfg, colls, history, NOW)
     assert result == ["Movie A"]
+
+
+def test_duplicate_fixed_slots_dedup():
+    cfg = make_config([FixedSlot("Recently Added"), FixedSlot("Recently Added")])
+    result = resolve_slots(cfg, {}, EMPTY_HISTORY, NOW)
+    assert result == ["Recently Added"]
+
+
+def test_injected_rng_makes_pick_deterministic():
+    group = make_group()
+    cfg = make_config([PickSlot(["movies"])], {"movies": group})
+    picks = {
+        resolve_slots(cfg, ALL_COLLS, EMPTY_HISTORY, NOW, rng=random.Random(1))[0]
+        for _ in range(5)
+    }
+    assert len(picks) == 1
 
 
 def test_multiple_fixed_and_pick_slots():
