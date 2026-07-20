@@ -46,7 +46,6 @@ def apply_pins(
     plex: PlexServer,
     library_names: list[str],
     resolved: list[str],
-    label: str,
     history: dict[str, datetime],
 ) -> PinResult:
     """Fully manage the pinned home screen (ADR-0002).
@@ -91,11 +90,6 @@ def apply_pins(
             hub = hub_by_title.get(title) or coll.visibility()
             hub.promoteHome()
             hub.promoteShared()
-            if label:
-                try:
-                    coll.addLabel(label)
-                except Exception as e:
-                    log.error("Failed to add label %r to %r: %s", label, title, e)
             result.pinned.append(title)
             log.info("Pinned %r", title)
         except Exception as e:
@@ -107,13 +101,6 @@ def apply_pins(
             continue
         try:
             hub = hub_by_title.get(title) or coll.visibility()
-            if label:
-                try:
-                    current = [lbl.tag for lbl in (coll.labels or [])]
-                    if label in current:
-                        coll.removeLabel(label)
-                except Exception as e:
-                    log.error("Failed to remove label %r from %r: %s", label, title, e)
             hub.demoteHome()
             hub.demoteShared()
             result.unpinned.append(title)

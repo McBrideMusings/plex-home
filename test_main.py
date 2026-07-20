@@ -70,17 +70,6 @@ def test_run_cycle_skips_webhook_when_unconfigured():
     m["webhook"].assert_not_called()
 
 
-def test_run_cycle_passes_pinned_label():
-    patches, m, _ = patch_cycle_deps(resolved=["A"])
-    try:
-        main.run_cycle(make_config())
-    finally:
-        for p in patches.values():
-            p.stop()
-    # apply_pins(plex, library_names, resolved, label, history) — label is 4th positional
-    assert m["apply_pins"].call_args.args[3] == main.PINNED_LABEL
-
-
 def test_sigint_handler_stops_running():
     main._running = True
     main._handle_sigint(2, None)

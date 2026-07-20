@@ -15,8 +15,6 @@ from webhook import send_webhook
 
 log = logging.getLogger("collexions")
 
-# Plex label applied to every collection this tool pins (removed on unpin).
-PINNED_LABEL = "Pinned by ColleXions"
 # How long to wait before retrying when the config file itself won't load.
 CONFIG_ERROR_RETRY_MINUTES = 5
 
@@ -39,7 +37,7 @@ def run_cycle(config: Config) -> list[str]:
     resolved = resolve_slots(config, all_collections, history, now)
     log.info("Resolved %d collection(s): %s", len(resolved), ", ".join(resolved) or "(none)")
 
-    pin_result = apply_pins(plex, config.library_names, resolved, PINNED_LABEL, history)
+    pin_result = apply_pins(plex, config.library_names, resolved, history)
     save_history(pin_result.history)
 
     apply_order(plex, config.library_names, resolved)
