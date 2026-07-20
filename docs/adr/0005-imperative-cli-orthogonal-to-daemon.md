@@ -1,0 +1,12 @@
+# Imperative CLI, orthogonal to the declarative daemon
+
+The tool grows a CLI (`list`, `pin`, `unpin`, `move`) that operates on the live Plex home screen **imperatively** — each command reads or mutates Plex directly, right now. This sits alongside the declarative daemon (`run`), which under ADR-0002 treats the config as the complete source of truth and reconciles the home screen to it every cycle. The two are deliberately kept **orthogonal**: the CLI does not edit the config, and the daemon does not know about CLI actions.
+
+The consequence is that CLI mutations are **ephemeral against a running daemon**. If the daemon is running, the next cycle unpins anything not in the resolved config set and re-imposes config slot order — reverting a manual `pin` or `move`. This is intended, not a bug: the config stays the single declarative source (ADR-0002), so there is exactly one way to make a pin *persist* — put it in the config. The CLI is for inspection, verification, and live one-off adjustments (typically with the daemon stopped), not for durable layout changes.
+
+The alternative considered was a **declarative CLI** that edits the config (`pin` appends a slot, `move` reorders slots, then applies a cycle). Rejected for now: it is a second way to write slots, it is worse for the CLI's primary purpose (poke the Plex API and watch the home screen change), and config editing is a separable concern that can be added later without disturbing the imperative commands.
+
+Two decisions follow from the orthogonality:
+
+- **Uniform managed-hub model.** Every home-screen row is a Plex `ManagedHub`, whether a system hub (Recently Added, Trending) or a user collection. All support `move` / `promoteHome` / `demoteHome`, so the CLI treats them identically for `list` / `move` / `pin` / `unpin` — no system-vs-collection special-casing. Only deletion is restricted (system hubs are not deletable), and the CLI does not delete. The unit is per-library, because `ManagedHub.move` reorders within a library section and there is no single cross-library home order to manipulate.
+- **No tool label.** The daemon's `Pinned by ColleXions` label was cosmetic — written on pin, removed on unpin, but never read for reconciliation (ADR-0002 unpins everything not in config regardless of label). It is removed entirely. The CLI never adds it. `list` distinguishes config-managed from manual pins by comparing live hubs against the resolved config, not from any Plex label.
