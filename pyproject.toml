@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plex-home"
+version = "0.1.0"
+description = "Automatic home-screen collection pinner for Plex Media Server"
+requires-python = ">=3.10"
+dependencies = [
+    "plexapi",
+    "requests",
+    "pyyaml",
+]
+
+[project.scripts]
+plex-home = "plex_home.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

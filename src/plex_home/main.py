@@ -4,17 +4,17 @@ import signal
 import time
 from datetime import datetime, timezone
 
-import cli
-from config import load_config, ConfigError, Config
-from plex_client import connect, fetch_collections
-from hubs import HubError
-from history import load_history, save_history
-from resolver import resolve_slots
-from pinning import apply_pins
-from ordering import apply_order
-from webhook import send_webhook
+from . import cli
+from .config import load_config, ConfigError, Config
+from .plex_client import connect, fetch_collections
+from .hubs import HubError
+from .history import load_history, save_history
+from .resolver import resolve_slots
+from .pinning import apply_pins
+from .ordering import apply_order
+from .webhook import send_webhook
 
-log = logging.getLogger("collexions")
+log = logging.getLogger("plex_home")
 
 # How long to wait before retrying when the config file itself won't load.
 CONFIG_ERROR_RETRY_MINUTES = 5
@@ -66,7 +66,7 @@ def _interruptible_sleep(minutes: float) -> None:
 def run_daemon(config_path: str) -> int:
     """Run the pinning daemon: reload config each cycle, reconcile, sleep, repeat."""
     signal.signal(signal.SIGINT, _handle_sigint)
-    log.info("ColleXions starting — config: %s", config_path)
+    log.info("Plex Home starting — config: %s", config_path)
 
     while _running:
         # Reload config every cycle so edits take effect without a restart.
@@ -85,7 +85,7 @@ def run_daemon(config_path: str) -> int:
 
         _interruptible_sleep(config.cadence.interval_minutes)
 
-    log.info("ColleXions stopped cleanly.")
+    log.info("Plex Home stopped cleanly.")
     return 0
 
 

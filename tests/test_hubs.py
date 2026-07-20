@@ -2,9 +2,9 @@ from unittest.mock import MagicMock
 import pytest
 from plexapi.exceptions import NotFound
 
-import hubs
-from hubs import HubError
-from config import Config, Cadence, FixedSlot
+from plex_home import hubs
+from plex_home.hubs import HubError
+from plex_home.config import Config, Cadence, FixedSlot
 
 
 def make_hub(title: str, identifier: str, pinned: bool = True) -> MagicMock:

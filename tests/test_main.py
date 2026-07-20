@@ -1,8 +1,8 @@
 from unittest.mock import patch, MagicMock
 import pytest
 
-import main
-from config import ConfigError
+from plex_home import main
+from plex_home.config import ConfigError
 
 
 @pytest.fixture(autouse=True)
@@ -28,14 +28,14 @@ def patch_cycle_deps(resolved=None):
     pin_result = MagicMock()
     pin_result.history = {"A": "ts"}
     patches = {
-        "connect": patch("main.connect", return_value=MagicMock()),
-        "fetch": patch("main.fetch_collections", return_value={"Movies": []}),
-        "load_history": patch("main.load_history", return_value={}),
-        "resolve": patch("main.resolve_slots", return_value=resolved),
-        "apply_pins": patch("main.apply_pins", return_value=pin_result),
-        "save_history": patch("main.save_history"),
-        "apply_order": patch("main.apply_order"),
-        "webhook": patch("main.send_webhook", return_value=True),
+        "connect": patch("plex_home.main.connect", return_value=MagicMock()),
+        "fetch": patch("plex_home.main.fetch_collections", return_value={"Movies": []}),
+        "load_history": patch("plex_home.main.load_history", return_value={}),
+        "resolve": patch("plex_home.main.resolve_slots", return_value=resolved),
+        "apply_pins": patch("plex_home.main.apply_pins", return_value=pin_result),
+        "save_history": patch("plex_home.main.save_history"),
+        "apply_order": patch("plex_home.main.apply_order"),
+        "webhook": patch("plex_home.main.send_webhook", return_value=True),
     }
     started = {name: p.start() for name, p in patches.items()}
     return patches, started, pin_result
@@ -78,7 +78,7 @@ def test_sigint_handler_stops_running():
 
 def test_interruptible_sleep_returns_early_when_stopped():
     main._running = False
-    with patch("main.time.sleep") as sleep:
+    with patch("plex_home.main.time.sleep") as sleep:
         main._interruptible_sleep(10)
     sleep.assert_not_called()
 
@@ -92,7 +92,7 @@ def test_interruptible_sleep_ticks_when_running():
         if calls["n"] >= 3:
             main._running = False
 
-    with patch("main.time.sleep", side_effect=fake_sleep):
+    with patch("plex_home.main.time.sleep", side_effect=fake_sleep):
         main._interruptible_sleep(1)
     assert calls["n"] == 3
 
@@ -102,10 +102,10 @@ def test_main_runs_one_cycle_then_exits():
         main._running = False
         return ["A"]
 
-    with patch("main.load_config", return_value=make_config()) as load, \
-         patch("main.run_cycle", side_effect=stop_after) as cycle, \
-         patch("main._interruptible_sleep"), \
-         patch("main.signal.signal"):
+    with patch("plex_home.main.load_config", return_value=make_config()) as load, \
+         patch("plex_home.main.run_cycle", side_effect=stop_after) as cycle, \
+         patch("plex_home.main._interruptible_sleep"), \
+         patch("plex_home.main.signal.signal"):
         rc = main.main(["run"])
     assert rc == 0
     load.assert_called_once()
@@ -121,10 +121,10 @@ def test_main_reloads_config_each_cycle():
             main._running = False
         return make_config()
 
-    with patch("main.load_config", side_effect=count_loads), \
-         patch("main.run_cycle", return_value=[]), \
-         patch("main._interruptible_sleep"), \
-         patch("main.signal.signal"):
+    with patch("plex_home.main.load_config", side_effect=count_loads), \
+         patch("plex_home.main.run_cycle", return_value=[]), \
+         patch("plex_home.main._interruptible_sleep"), \
+         patch("plex_home.main.signal.signal"):
         main.main(["run"])
     assert seen["n"] == 2
 
@@ -138,10 +138,10 @@ def test_main_config_error_sleeps_and_retries_without_running_cycle():
             main._running = False
         raise ConfigError("bad config")
 
-    with patch("main.load_config", side_effect=raise_then_stop), \
-         patch("main.run_cycle") as cycle, \
-         patch("main._interruptible_sleep") as sleep, \
-         patch("main.signal.signal"):
+    with patch("plex_home.main.load_config", side_effect=raise_then_stop), \
+         patch("plex_home.main.run_cycle") as cycle, \
+         patch("plex_home.main._interruptible_sleep") as sleep, \
+         patch("plex_home.main.signal.signal"):
         main.main(["run"])
     cycle.assert_not_called()
     sleep.assert_called_once_with(main.CONFIG_ERROR_RETRY_MINUTES)
@@ -152,10 +152,10 @@ def test_main_cycle_error_does_not_crash_loop():
         main._running = False
         raise RuntimeError("plex down")
 
-    with patch("main.load_config", return_value=make_config()), \
-         patch("main.run_cycle", side_effect=boom_then_stop), \
-         patch("main._interruptible_sleep") as sleep, \
-         patch("main.signal.signal"):
+    with patch("plex_home.main.load_config", return_value=make_config()), \
+         patch("plex_home.main.run_cycle", side_effect=boom_then_stop), \
+         patch("plex_home.main._interruptible_sleep") as sleep, \
+         patch("plex_home.main.signal.signal"):
         rc = main.main(["run"])
     assert rc == 0
     # still slept the normal interval after the failed cycle
@@ -164,31 +164,31 @@ def test_main_cycle_error_does_not_crash_loop():
 
 def test_main_dispatches_subcommand_to_handler():
     handler = MagicMock(return_value=0)
-    with patch("main.load_config", return_value=make_config()), \
-         patch("main.connect", return_value=MagicMock()), \
-         patch("cli.HANDLERS", {"list": handler}):
+    with patch("plex_home.main.load_config", return_value=make_config()), \
+         patch("plex_home.main.connect", return_value=MagicMock()), \
+         patch("plex_home.cli.HANDLERS", {"list": handler}):
         rc = main.main(["list"])
     assert rc == 0
     handler.assert_called_once()
 
 
 def test_main_command_config_error_returns_2():
-    with patch("main.load_config", side_effect=ConfigError("bad")):
+    with patch("plex_home.main.load_config", side_effect=ConfigError("bad")):
         rc = main.main(["list"])
     assert rc == 2
 
 
 def test_main_command_connect_error_returns_2():
-    with patch("main.load_config", return_value=make_config()), \
-         patch("main.connect", side_effect=RuntimeError("no plex")):
+    with patch("plex_home.main.load_config", return_value=make_config()), \
+         patch("plex_home.main.connect", side_effect=RuntimeError("no plex")):
         rc = main.main(["list"])
     assert rc == 2
 
 
 def test_main_command_hub_error_returns_1():
-    from hubs import HubError
-    with patch("main.load_config", return_value=make_config()), \
-         patch("main.connect", return_value=MagicMock()), \
-         patch("cli.HANDLERS", {"list": MagicMock(side_effect=HubError("boom"))}):
+    from plex_home.hubs import HubError
+    with patch("plex_home.main.load_config", return_value=make_config()), \
+         patch("plex_home.main.connect", return_value=MagicMock()), \
+         patch("plex_home.cli.HANDLERS", {"list": MagicMock(side_effect=HubError("boom"))}):
         rc = main.main(["list"])
     assert rc == 1

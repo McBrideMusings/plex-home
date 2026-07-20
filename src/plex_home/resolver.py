@@ -3,10 +3,10 @@ import random
 import logging
 from datetime import datetime
 
-from config import Config, FixedSlot, PickSlot
-from plex_client import CollectionInfo
-from history import is_blocked
-from eligibility import eligible_collections
+from .config import Config, FixedSlot, PickSlot
+from .plex_client import CollectionInfo
+from .history import is_blocked
+from .eligibility import eligible_collections
 
 log = logging.getLogger(__name__)
 

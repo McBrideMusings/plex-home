@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime, date, time
-from config import Group
-from plex_client import CollectionInfo
+from .config import Group
+from .plex_client import CollectionInfo
 
 
 def is_group_eligible(group: Group, now: datetime) -> bool:

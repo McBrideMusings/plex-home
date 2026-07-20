@@ -1,8 +1,8 @@
 import pytest
 from datetime import datetime, timezone
-from config import Group
-from plex_client import CollectionInfo
-import eligibility as e
+from plex_home.config import Group
+from plex_home.plex_client import CollectionInfo
+from plex_home import eligibility as e
 
 
 def dt(month, day, hour=12, minute=0):

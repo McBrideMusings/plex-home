@@ -3,7 +3,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
-import history as h
+from plex_home import history as h
 
 
 def make_history(hours_ago: float, title: str = "Test Collection") -> dict[str, datetime]:

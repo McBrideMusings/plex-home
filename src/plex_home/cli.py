@@ -10,15 +10,15 @@ import logging
 
 from plexapi.server import PlexServer
 
-import hubs
-from config import Config
-from hubs import HubError
+from . import hubs
+from .config import Config
+from .hubs import HubError
 
-log = logging.getLogger("collexions")
+log = logging.getLogger("plex_home")
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="collexions", description="ColleXions — Plex collection pinner")
+    parser = argparse.ArgumentParser(prog="plex-home", description="Plex Home — Plex collection pinner")
     parser.add_argument("--config", default="config.yaml", help="Path to the YAML config (default: config.yaml)")
     sub = parser.add_subparsers(dest="command", required=True)
 

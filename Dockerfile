@@ -9,19 +9,17 @@ ENV PYTHONUNBUFFERED=1
 # Set the working directory in the container
 WORKDIR /app
 
-# Copy the requirements file into the container at /app
-COPY requirements.txt .
+# Copy the package sources and project metadata
+COPY pyproject.toml ./
+COPY src ./src
 
-# Install any needed packages specified in requirements.txt
+# Install the package (pulls deps from pyproject and registers the plex-home console script)
 # --no-cache-dir reduces image size, --upgrade pip ensures pip is recent
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir .
 
-# Copy the application modules into the container at /app
-COPY main.py cli.py hubs.py config.py eligibility.py plex_client.py history.py resolver.py pinning.py ordering.py webhook.py ./
-
-# Define the command to run the daemon when the container starts.
-# main.py has subcommands (run/list/pin/unpin/move); the container runs the daemon.
+# Run the daemon when the container starts.
+# plex-home has subcommands (run/list/pin/unpin/move); the container runs the daemon.
 # The YAML config is mounted at runtime (e.g. -v $(pwd)/config.yaml:/app/config.yaml);
 # logs go to stdout, so no logs directory is needed.
-CMD ["python", "main.py", "run"]
+CMD ["plex-home", "run"]

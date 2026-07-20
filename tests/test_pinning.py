@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 from plexapi.exceptions import NotFound
 
-import pinning
+from plex_home import pinning
 
 
 def make_collection(title: str, promoted: bool) -> MagicMock:

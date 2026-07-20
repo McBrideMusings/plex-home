@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch, PropertyMock
 from plexapi.exceptions import NotFound, Unauthorized
 import requests.exceptions
 
-import plex_client as pc
+from plex_home import plex_client as pc
 
 
 def make_label(tag: str) -> MagicMock:
@@ -77,20 +77,20 @@ def test_empty_labels_list():
 
 
 def test_connect_raises_on_unauthorized():
-    with patch("plex_client.PlexServer", side_effect=Unauthorized("bad token")):
+    with patch("plex_home.plex_client.PlexServer", side_effect=Unauthorized("bad token")):
         with pytest.raises(ConnectionError, match="auth failed"):
             pc.connect("http://localhost:32400", "badtoken")
 
 
 def test_connect_raises_on_connection_error():
-    with patch("plex_client.PlexServer", side_effect=requests.exceptions.ConnectionError("refused")):
+    with patch("plex_home.plex_client.PlexServer", side_effect=requests.exceptions.ConnectionError("refused")):
         with pytest.raises(ConnectionError, match="Could not connect"):
             pc.connect("http://0.0.0.0:99", "token")
 
 
 def test_connect_returns_server_on_success():
     mock_server = MagicMock()
-    with patch("plex_client.PlexServer", return_value=mock_server):
+    with patch("plex_home.plex_client.PlexServer", return_value=mock_server):
         result = pc.connect("http://localhost:32400", "validtoken")
     assert result is mock_server
 

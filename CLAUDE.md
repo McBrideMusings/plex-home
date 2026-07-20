@@ -1,35 +1,37 @@
-# ColleXions — Plex Collection Pinner
+# Plex Home — Plex Collection Pinner
 
-ColleXions is a Python daemon that automatically rotates which collections are "pinned" (promoted to the home screen) on a Plex Media Server. On each cycle it resolves an ordered list of home-screen *slots* — each slot is either a fixed collection or a *pick* that selects the first eligible collection from a list of named groups — then fully manages the home screen: it pins the resolved set, unpins every other promoted collection, and reorders the pinned hubs to match slot order. It logs to stdout, optionally POSTs a per-cycle summary to a webhook, and tags every pinned collection with a fixed Plex label (`Pinned by ColleXions`) so they can be identified or filtered in the Plex UI.
+Plex Home is a Python daemon that automatically rotates which collections are "pinned" (promoted to the home screen) on a Plex Media Server. On each cycle it resolves an ordered list of home-screen *slots* — each slot is either a fixed collection or a *pick* that selects the first eligible collection from a list of named groups — then fully manages the home screen: it pins the resolved set, unpins every other promoted collection, and reorders the pinned hubs to match slot order. It logs to stdout and optionally POSTs a per-cycle summary to a webhook.
+
+The code is a `plex_home` package under `src/`, with the test suite in `tests/`.
 
 ## Running
 
-`main.py` is the single entrypoint, with subcommands: `run` (the daemon) plus a live-control CLI (`list`, `pin`, `unpin`, `move`). A global `--config` flag (default `config.yaml`) supplies the Plex connection for every subcommand.
+The package exposes one console command, `plex-home`, with subcommands: `run` (the daemon) plus a live-control CLI (`list`, `pin`, `unpin`, `move`). A global `--config` flag (default `config.yaml`) supplies the Plex connection for every subcommand. Without installing, the equivalent is `python -m plex_home` (with `src/` on `PYTHONPATH`).
 
 ### Daemon
 ```
-pip install -r requirements.txt
-python main.py run [--config config.yaml]
+pip install -e .
+plex-home run [--config config.yaml]
 ```
 `run` reloads the config at the start of every cycle (so edits take effect without a restart), reconciles the home screen to the config, then sleeps `interval_minutes`. It runs forever; interrupt with Ctrl-C — SIGINT triggers a clean shutdown after the current sleep. Logging goes to stdout only (there is no log file).
 
 ### CLI — live home-screen control (ADR-0005)
 `list` / `pin` / `unpin` / `move` operate on the live Plex home screen **imperatively**, independent of the config. The home screen is treated as a per-library, indexed list of pinned hubs (system and collection hubs alike). A running daemon reconciles the home back to the config, so CLI changes are ephemeral against it.
 ```
-python main.py list  [--library NAME] [--available] [--json]
-python main.py pin   "Title" [--library NAME] [--to K | --to-top] [--dry-run]
-python main.py unpin <index|Title> --library NAME [--dry-run]
-python main.py move  <index|Title> --library NAME (--to K | --up [N] | --down [N] | --to-top | --to-bottom) [--dry-run]
+plex-home list  [--library NAME] [--available] [--json]
+plex-home pin   "Title" [--library NAME] [--to K | --to-top] [--dry-run]
+plex-home unpin <index|Title> --library NAME [--dry-run]
+plex-home move  <index|Title> --library NAME (--to K | --up [N] | --down [N] | --to-top | --to-bottom) [--dry-run]
 ```
 `--dry-run` prints the intended operation without calling Plex. Index targets are per-library, so `--library` is required for index-based `unpin`/`move`; title targets auto-resolve across configured libraries (error on collision). Plex drops a fresh `pin` at a Plex-determined position (observed mid-list), so use `--to K` for explicit placement.
 
 ### Docker
-The container runs the daemon (`CMD ["python", "main.py", "run"]`). Mount the YAML config; read logs via `docker logs` (stdout, no file):
+The container installs the package and runs the daemon (`CMD ["plex-home", "run"]`). Mount the YAML config; read logs via `docker logs` (stdout, no file):
 ```
-docker build -t collexions .
+docker build -t plex-home .
 docker run -d \
   -v $(pwd)/config.yaml:/app/config.yaml \
-  collexions
+  plex-home
 ```
 
 ## Configuration (`config.yaml`)
@@ -111,43 +113,44 @@ home:
 
 ## Key files
 
+All modules live in `src/plex_home/`; all tests in `tests/`.
+
 | File | Purpose |
 |------|---------|
-| `config.py` | New config loader — parses and validates the YAML config into typed dataclasses |
-| `eligibility.py` | Group eligibility engine — evaluates date/time constraints and applies include/exclude/min-items filters |
-| `plex_client.py` | Plex data-access layer — connects to PlexServer, fetches collections per library as CollectionInfo objects |
-| `history.py` | Repeat-block history — tracks pinned collections with timestamps, answers "is this blocked?" |
-| `resolver.py` | Slot resolver — walks configured home slots, resolves fixed + pick slots (sequential group priority), dedups across slots |
-| `pinning.py` | Pin/unpin engine — fully manages the home screen (ADR-0002): pins resolved collections, unpins everything else, updates repeat-block history |
-| `ordering.py` | Hub ordering — reorders home-screen managed hubs to match the resolved slot order via the Plex Move Hub API (`ManagedHub.move`) |
-| `webhook.py` | Optional webhook notifier — POSTs a per-cycle summary (pinned titles + timestamp) when `webhook_url` is configured; never raises |
-| `main.py` | Single entrypoint — builds the subcommand parser and dispatches: `run` → the daemon loop (reload config each cycle, fetch → resolve → pin → order → webhook, sleep, clean SIGINT shutdown, per-cycle error retry); `list`/`pin`/`unpin`/`move` → the CLI handlers |
-| `hubs.py` | Imperative managed-hub layer for the CLI (ADR-0005) — lists pinned hubs per library as an indexed order, and pins/unpins/moves them via `ManagedHub` (system + collection uniform); never touches the config |
-| `cli.py` | CLI subcommand parsing, library resolution, relative-move math, and table/JSON output for `list`/`pin`/`unpin`/`move` |
-| `test_config.py` | Pytest suite for config loader (run with `.venv/bin/pytest`) |
-| `test_history.py` | Pytest suite for repeat-block history |
-| `test_eligibility.py` | Pytest suite for group eligibility engine |
-| `test_plex_client.py` | Pytest suite for Plex client (fully mocked) |
-| `test_resolver.py` | Pytest suite for slot resolver |
-| `test_pinning.py` | Pytest suite for pin/unpin engine (fully mocked) |
-| `test_ordering.py` | Pytest suite for hub ordering (fully mocked) |
-| `test_webhook.py` | Pytest suite for the webhook notifier (fully mocked) |
-| `test_main.py` | Pytest suite for the main loop + run_cycle wiring + subcommand dispatch (fully mocked) |
-| `test_hubs.py` | Pytest suite for the managed-hub operations layer (fully mocked) |
-| `test_cli.py` | Pytest suite for CLI parsing, handlers, and output (fully mocked) |
-| `ColleXions.py` | Original monolithic script — reference only, superseded by `main.py` + the modules above; not run |
-| `config.json` | Old flat JSON config from the original script — reference only; the current entrypoint reads YAML |
-| `config.yaml` | Runtime YAML config read by `main.py` (path overridable via the CLI arg) — user-provided, not committed with real credentials |
-| `requirements.txt` | Python dependencies — `plexapi`, `requests`, `pyyaml` are imported; `Werkzeug`, `schedule`, `psutil` are unused leftovers |
-| `Dockerfile` | Container build (`python:3.12-slim-bullseye`); still COPYs/runs the old `collexions.py` — update to `main.py` before building (see Running) |
-| `collexions_template.xml` | Plex XML template (reference/documentation artifact, not used by the code) |
+| `src/plex_home/config.py` | Config loader — parses and validates the YAML config into typed dataclasses |
+| `src/plex_home/eligibility.py` | Group eligibility engine — evaluates date/time constraints and applies include/exclude/min-items filters |
+| `src/plex_home/plex_client.py` | Plex data-access layer — connects to PlexServer, fetches collections per library as CollectionInfo objects |
+| `src/plex_home/history.py` | Repeat-block history — tracks pinned collections with timestamps, answers "is this blocked?" |
+| `src/plex_home/resolver.py` | Slot resolver — walks configured home slots, resolves fixed + pick slots (sequential group priority), dedups across slots |
+| `src/plex_home/pinning.py` | Pin/unpin engine — fully manages the home screen (ADR-0002): pins resolved collections, unpins everything else, updates repeat-block history |
+| `src/plex_home/ordering.py` | Hub ordering — reorders home-screen managed hubs to match the resolved slot order via the Plex Move Hub API (`ManagedHub.move`) |
+| `src/plex_home/webhook.py` | Optional webhook notifier — POSTs a per-cycle summary (pinned titles + timestamp) when `webhook_url` is configured; never raises |
+| `src/plex_home/main.py` | Entrypoint logic — builds the subcommand parser and dispatches: `run` → the daemon loop (reload config each cycle, fetch → resolve → pin → order → webhook, sleep, clean SIGINT shutdown, per-cycle error retry); `list`/`pin`/`unpin`/`move` → the CLI handlers. Exposed as the `plex-home` console script and `python -m plex_home` |
+| `src/plex_home/hubs.py` | Imperative managed-hub layer for the CLI (ADR-0005) — lists pinned hubs per library as an indexed order, and pins/unpins/moves them via `ManagedHub` (system + collection uniform); never touches the config |
+| `src/plex_home/cli.py` | CLI subcommand parsing, library resolution, relative-move math, and table/JSON output for `list`/`pin`/`unpin`/`move` |
+| `src/plex_home/__main__.py` | `python -m plex_home` shim — calls `main.main()` |
+| `src/plex_home/__init__.py` | Package marker |
+| `tests/test_config.py` | Pytest suite for config loader (run with `.venv/bin/pytest`) |
+| `tests/test_history.py` | Pytest suite for repeat-block history |
+| `tests/test_eligibility.py` | Pytest suite for group eligibility engine |
+| `tests/test_plex_client.py` | Pytest suite for Plex client (fully mocked) |
+| `tests/test_resolver.py` | Pytest suite for slot resolver |
+| `tests/test_pinning.py` | Pytest suite for pin/unpin engine (fully mocked) |
+| `tests/test_ordering.py` | Pytest suite for hub ordering (fully mocked) |
+| `tests/test_webhook.py` | Pytest suite for the webhook notifier (fully mocked) |
+| `tests/test_main.py` | Pytest suite for the main loop + run_cycle wiring + subcommand dispatch (fully mocked) |
+| `tests/test_hubs.py` | Pytest suite for the managed-hub operations layer (fully mocked) |
+| `tests/test_cli.py` | Pytest suite for CLI parsing, handlers, and output (fully mocked) |
+| `pyproject.toml` | Package metadata, runtime deps, `plex-home` console script, and pytest config (`pythonpath = src`) |
+| `config.yaml` | Runtime YAML config (path overridable via the global `--config` flag) — user-provided, not committed with real credentials |
+| `requirements.txt` | Runtime deps for `pip install -r` (`plexapi`, `requests`, `pyyaml`); mirrors the `dependencies` in `pyproject.toml` |
+| `Dockerfile` | Container build (`python:3.12-slim-bullseye`) — `pip install .` then `CMD ["plex-home", "run"]` |
 | `pin_history.json` | Auto-generated at runtime by `history.py`; maps pinned collection title → last-pinned UTC timestamp for recency blocking. Delete to reset |
 
 ## Gotchas
 
 - **Logging is stdout-only** — `main.py` calls `logging.basicConfig` with no file handler, so there is no log file to rotate or truncate. Under Docker, read logs via `docker logs`.
 - **`pin_history.json` is mutable state** — `history.py` rewrites it each cycle (collection title → last-pinned UTC timestamp). Delete it to reset the recency-block history; a missing or corrupt file is handled gracefully (starts fresh).
-- **Dockerfile COPY/CMD reference `collexions.py`** — that lowercase file does not exist (the entrypoint is `main.py`), so the container fails until the `COPY` and `CMD` are updated. On a case-insensitive filesystem `collexions.py` also collides with `ColleXions.py`.
-- **`requirements.txt` includes unused packages** — `Werkzeug`, `schedule`, and `psutil` are leftovers from the original script. `plexapi`, `requests`, and `pyyaml` are the ones actually imported.
-- **Config errors don't crash the daemon** — `config.py` raises `ConfigError` on any invalid or missing field; `main.py` catches it, logs the message, and retries in 5 minutes (`CONFIG_ERROR_RETRY_MINUTES`) instead of exiting. The pinned label is a fixed constant (`Pinned by ColleXions` in `main.py`), not a config key.
+- **Tests need `src/` on the path** — `pyproject.toml` sets `pythonpath = ["src"]`, so `.venv/bin/pytest` imports `plex_home` without an install. Running pytest a different way (or importing the modules directly) requires `pip install -e .` or `PYTHONPATH=src` first.
+- **Config errors don't crash the daemon** — `config.py` raises `ConfigError` on any invalid or missing field; `main.py` catches it, logs the message, and retries in 5 minutes (`CONFIG_ERROR_RETRY_MINUTES`) instead of exiting.
 - **Unpin scope is every promoted collection** — ADR-0002 makes the tool the sole manager of the home screen: any collection promoted by other means (e.g. manually in Plex) that isn't in the resolved set is unpinned each cycle. There is no exclusion list.

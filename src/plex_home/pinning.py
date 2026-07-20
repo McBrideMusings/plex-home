@@ -6,7 +6,7 @@ from datetime import datetime
 from plexapi.server import PlexServer
 from plexapi.exceptions import NotFound
 
-from history import record_pins
+from .history import record_pins
 
 log = logging.getLogger(__name__)
 

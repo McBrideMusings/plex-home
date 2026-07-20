@@ -3,9 +3,9 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch
 
-from config import Config, Cadence, FixedSlot, PickSlot, Group
-from plex_client import CollectionInfo
-from resolver import resolve_slots
+from plex_home.config import Config, Cadence, FixedSlot, PickSlot, Group
+from plex_home.plex_client import CollectionInfo
+from plex_home.resolver import resolve_slots
 
 
 def make_config(slots, groups=None) -> Config:

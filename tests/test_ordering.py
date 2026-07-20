@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, call
 from plexapi.exceptions import NotFound
 
-import ordering
+from plex_home import ordering
 
 
 def make_hub(title: str) -> MagicMock:

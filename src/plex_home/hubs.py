@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from plexapi.server import PlexServer
 from plexapi.exceptions import NotFound
 
-from config import Config, FixedSlot
+from .config import Config, FixedSlot
 
 log = logging.getLogger(__name__)
 

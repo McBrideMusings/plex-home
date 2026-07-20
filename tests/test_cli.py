@@ -2,9 +2,9 @@ import json
 from unittest.mock import patch, MagicMock
 import pytest
 
-import cli
-from cli import build_parser
-from hubs import HubView, HubError
+from plex_home import cli
+from plex_home.cli import build_parser
+from plex_home.hubs import HubView, HubError
 
 
 def make_cfg(libraries=("Movies",)):
@@ -44,7 +44,7 @@ def test_cmd_list_table(capsys):
         HubView("Movies", 1, "Halloween", "collection", True),
         HubView("Movies", 2, "Rando", "collection", False),
     ]
-    with patch("cli.hubs.list_pinned", return_value={"Movies": views}):
+    with patch("plex_home.cli.hubs.list_pinned", return_value={"Movies": views}):
         args = build_parser().parse_args(["list"])
         rc = cli.cmd_list(MagicMock(), make_cfg(), args)
     out = capsys.readouterr().out
@@ -56,7 +56,7 @@ def test_cmd_list_table(capsys):
 
 def test_cmd_list_json(capsys):
     views = [HubView("Movies", 0, "Rec", "system", False)]
-    with patch("cli.hubs.list_pinned", return_value={"Movies": views}):
+    with patch("plex_home.cli.hubs.list_pinned", return_value={"Movies": views}):
         args = build_parser().parse_args(["list", "--json"])
         cli.cmd_list(MagicMock(), make_cfg(), args)
     data = json.loads(capsys.readouterr().out)
@@ -66,8 +66,8 @@ def test_cmd_list_json(capsys):
 
 
 def test_cmd_list_available_included(capsys):
-    with patch("cli.hubs.list_pinned", return_value={"Movies": []}), \
-         patch("cli.hubs.list_available", return_value={"Movies": ["A24", "Ghibli"]}):
+    with patch("plex_home.cli.hubs.list_pinned", return_value={"Movies": []}), \
+         patch("plex_home.cli.hubs.list_available", return_value={"Movies": ["A24", "Ghibli"]}):
         args = build_parser().parse_args(["list", "--available"])
         cli.cmd_list(MagicMock(), make_cfg(), args)
     assert "available (2): A24, Ghibli" in capsys.readouterr().out
@@ -76,16 +76,16 @@ def test_cmd_list_available_included(capsys):
 # --- cmd_pin ---
 
 def test_cmd_pin_to_top_sets_index_zero():
-    with patch("cli._resolve_pin_library", return_value="Movies"), \
-         patch("cli.hubs.pin") as pin:
+    with patch("plex_home.cli._resolve_pin_library", return_value="Movies"), \
+         patch("plex_home.cli.hubs.pin") as pin:
         args = build_parser().parse_args(["pin", "Halloween", "--to-top"])
         cli.cmd_pin(MagicMock(), make_cfg(), args)
     assert pin.call_args.kwargs["to_index"] == 0
 
 
 def test_cmd_pin_native_placement_passes_none():
-    with patch("cli._resolve_pin_library", return_value="Movies"), \
-         patch("cli.hubs.pin") as pin:
+    with patch("plex_home.cli._resolve_pin_library", return_value="Movies"), \
+         patch("plex_home.cli.hubs.pin") as pin:
         args = build_parser().parse_args(["pin", "Halloween"])
         cli.cmd_pin(MagicMock(), make_cfg(), args)
     assert pin.call_args.kwargs["to_index"] is None
@@ -104,9 +104,9 @@ def test_cmd_pin_native_placement_passes_none():
     (["move", "X", "--to-bottom"], 4), # count - 1
 ])
 def test_cmd_move_computes_index(argv, expected):
-    with patch("cli._resolve_target_library", return_value="Movies"), \
-         patch("cli.hubs.locate", return_value=(2, 5)), \
-         patch("cli.hubs.move") as mv:
+    with patch("plex_home.cli._resolve_target_library", return_value="Movies"), \
+         patch("plex_home.cli.hubs.locate", return_value=(2, 5)), \
+         patch("plex_home.cli.hubs.move") as mv:
         args = build_parser().parse_args(argv)
         cli.cmd_move(MagicMock(), make_cfg(), args)
     assert mv.call_args.args[3] == expected
@@ -125,7 +125,7 @@ def test_resolve_target_library_finds_by_title():
         title = "Halloween" if name == "Movies" else "Other"
         return {name: [HubView(name, 0, title, "collection", False)]}
 
-    with patch("cli.hubs.list_pinned", side_effect=pinned):
+    with patch("plex_home.cli.hubs.list_pinned", side_effect=pinned):
         lib = cli._resolve_target_library(MagicMock(), make_cfg(("Movies", "TV Shows")), "Halloween", None)
     assert lib == "Movies"
 
@@ -135,6 +135,6 @@ def test_resolve_target_library_ambiguous_raises():
         name = libs[0]
         return {name: [HubView(name, 0, "Dup", "collection", False)]}
 
-    with patch("cli.hubs.list_pinned", side_effect=pinned):
+    with patch("plex_home.cli.hubs.list_pinned", side_effect=pinned):
         with pytest.raises(HubError):
             cli._resolve_target_library(MagicMock(), make_cfg(("Movies", "TV Shows")), "Dup", None)

@@ -2,7 +2,7 @@ import pytest
 import tempfile
 import os
 import yaml
-from config import load_config, ConfigError, FixedSlot, PickSlot
+from plex_home.config import load_config, ConfigError, FixedSlot, PickSlot
 
 
 def write_yaml(data: dict) -> str:
