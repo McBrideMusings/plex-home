@@ -189,6 +189,25 @@ def test_move_with_only_system_hubs_above_goes_to_top():
     c1.move.assert_called_once_with(after=None)
 
 
+def test_verify_placement_warns_on_mismatch(caplog):
+    import logging
+    a, b, c = collection_hub("A", 1), collection_hub("B", 2), collection_hub("C", 3)
+    section = make_section([a, b, c])
+    with caplog.at_level(logging.WARNING):
+        actual = hubs._verify_placement(section, "C", 0)  # C is at index 2, requested 0
+    assert actual == 2
+    assert "placed it at 2" in caplog.text
+
+
+def test_verify_placement_silent_on_match(caplog):
+    import logging
+    a, b = collection_hub("A", 1), collection_hub("B", 2)
+    section = make_section([a, b])
+    with caplog.at_level(logging.WARNING):
+        hubs._verify_placement(section, "A", 0)  # A already at index 0
+    assert caplog.text == ""
+
+
 def test_locate_returns_index_and_count():
     a, b, c = (collection_hub("A", 1), collection_hub("B", 2), collection_hub("C", 3))
     plex = make_plex({"Movies": make_section([a, b, c])})

@@ -90,12 +90,13 @@ def _resolve(pinned: list, target: str) -> int:
 def _apply_move(pinned: list, from_index: int, to_index: int, dry_run: bool) -> None:
     """Move the hub at ``from_index`` to ``to_index`` via remove-then-insert.
 
-    Plex only accepts a *collection* hub (or the top) as a move anchor — a
-    system-hub identifier is silently rejected. So the anchor is the nearest
-    collection hub at or above the destination slot, falling back to the top.
-    When the slot directly above the destination is a system hub, exact index
-    placement is unreachable (you cannot anchor after a system hub): the hub
-    lands just above that system hub instead, and the shortfall is logged.
+    Plex only accepts *some* hubs as a move anchor: a system hub and certain
+    Plex-curated collection hubs ("Recently Released", "… On Plex") silently
+    reject being an ``after=`` target. So the anchor is the nearest collection
+    hub at or above the destination slot, falling back to the top — and because
+    even a ``custom.collection`` anchor can be silently rejected, the caller
+    verifies the actual landing index afterward (``_verify_placement``) rather
+    than predicting exactness here.
     """
     hub = pinned[from_index]
     others = [h for i, h in enumerate(pinned) if i != from_index]
@@ -106,24 +107,34 @@ def _apply_move(pinned: list, from_index: int, to_index: int, dry_run: bool) -> 
         if _is_collection(others[j]):
             anchor = others[j]
             break
-    # Exact iff the slot directly above the destination is the anchor (a collection),
-    # or the destination is the top.
-    exact = to_index == 0 or (anchor is not None and anchor is others[to_index - 1])
 
     if dry_run:
-        note = "" if exact else " (approx — anchored to nearest collection past a system hub)"
-        log.info("[dry-run] move %r to index %d, after %r%s",
-                 getattr(hub, "title", ""), to_index, getattr(anchor, "title", None), note)
+        log.info("[dry-run] move %r toward index %d (anchor %r)",
+                 getattr(hub, "title", ""), to_index, getattr(anchor, "title", None))
         return
 
     hub.move(after=anchor)
-    if not exact:
+
+
+def _verify_placement(section, title: str, requested: int) -> int | None:
+    """Re-read the pinned order and warn if ``title`` did not land at ``requested``.
+
+    Some hubs cannot be anchored after (system rows, Plex-curated "On Plex" /
+    "Recently Released" hubs), so a move can silently place the hub short of the
+    requested index. Report the actual position honestly instead of assuming
+    success. Returns the actual index (or None if the hub is no longer pinned).
+    """
+    section.reload()
+    pinned = _pinned_hubs(section)
+    actual = next((i for i, h in enumerate(pinned) if getattr(h, "title", "") == title), None)
+    if actual is not None and actual != requested:
         log.warning(
-            "Moved %r after nearest collection %r — index %d sits just after a system hub, "
-            "which Plex cannot anchor to, so it was positioned above that hub instead. "
-            "To place it there, move the hub currently above it downward instead.",
-            getattr(hub, "title", ""), getattr(anchor, "title", None), to_index,
+            "Requested index %d for %r but Plex placed it at %d — the hub(s) below it "
+            "cannot be anchored after (system rows or Plex-curated 'On Plex' / "
+            "'Recently Released' hubs stay locked toward the bottom).",
+            requested, title, actual,
         )
+    return actual
 
 
 def list_pinned(plex: PlexServer, library_names: list[str], config: Config) -> dict[str, list[HubView]]:
@@ -184,7 +195,9 @@ def pin(plex: PlexServer, library: str, title: str, to_index: int | None = None,
         section.reload()
         pinned = _pinned_hubs(section)
         _apply_move(pinned, _resolve(pinned, title), to_index, dry_run=False)
-        log.info("Placed %r at index %d in %r", title, to_index, library)
+        actual = _verify_placement(section, title, to_index)
+        if actual is not None:
+            log.info("Placed %r at index %d in %r", title, actual, library)
 
 
 def unpin(plex: PlexServer, library: str, target: str, dry_run: bool = False) -> None:
@@ -205,4 +218,8 @@ def move(plex: PlexServer, library: str, target: str, to_index: int, dry_run: bo
     """Move a pinned hub to ``to_index`` in the home order, addressed by index or title."""
     section = _section(plex, library)
     pinned = _pinned_hubs(section)
-    _apply_move(pinned, _resolve(pinned, target), to_index, dry_run)
+    idx = _resolve(pinned, target)
+    title = getattr(pinned[idx], "title", "")
+    _apply_move(pinned, idx, to_index, dry_run)
+    if not dry_run:
+        _verify_placement(section, title, to_index)
