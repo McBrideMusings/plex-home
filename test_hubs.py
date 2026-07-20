@@ -141,52 +141,74 @@ def test_unpin_unknown_title_raises():
         hubs.unpin(plex, "Movies", "Ghost")
 
 
-def test_move_to_top_uses_after_none():
-    a, b, c = (collection_hub("A", 1), collection_hub("B", 2), collection_hub("C", 3))
-    plex = make_plex({"Movies": make_section([a, b, c])})
-    hubs.move(plex, "Movies", "C", 0)  # C from index 2 to top
-    c.move.assert_called_once_with(after=None)
+def make_reorderable_section(titles):
+    """Section whose managedHubs is a live list; each hub.move(after=None) moves
+    that hub to the front — simulating Plex's move-to-top."""
+    section = MagicMock()
+    live = []
+
+    def make(t):
+        h = collection_hub(t, len(live))
+
+        def mv(after=None, _h=h):
+            live.remove(_h)
+            live.insert(0, _h)
+
+        h.move.side_effect = mv
+        return h
+
+    for t in titles:
+        live.append(make(t))
+    section.managedHubs.return_value = live
+    return section, live
 
 
-def test_move_down_anchors_after_correct_hub():
-    a, b, c, d = (collection_hub("A", 1), collection_hub("B", 2),
-                  collection_hub("C", 3), collection_hub("D", 4))
-    plex = make_plex({"Movies": make_section([a, b, c, d])})
-    hubs.move(plex, "Movies", "A", 2)  # A (index 0) to index 2; others=[B,C,D] → after C
-    a.move.assert_called_once_with(after=c)
+# --- _target_order (pure repositioning math) ---
+
+def test_target_order_moves_hub_down():
+    pinned = [collection_hub(t, i) for i, t in enumerate(["A", "B", "C", "D"])]
+    assert hubs._target_order(pinned, 0, 2) == ["B", "C", "A", "D"]
 
 
-def test_move_to_bottom_anchors_after_last_remaining():
-    a, b, c = (collection_hub("A", 1), collection_hub("B", 2), collection_hub("C", 3))
-    plex = make_plex({"Movies": make_section([a, b, c])})
-    hubs.move(plex, "Movies", "A", 2)  # A to index 2 (bottom); others=[B,C] → after C
-    a.move.assert_called_once_with(after=c)
+def test_target_order_moves_hub_to_top():
+    pinned = [collection_hub(t, i) for i, t in enumerate(["A", "B", "C"])]
+    assert hubs._target_order(pinned, 2, 0) == ["C", "A", "B"]
 
 
-def test_move_dry_run_does_not_call_move():
-    a, b = collection_hub("A", 1), collection_hub("B", 2)
-    plex = make_plex({"Movies": make_section([a, b])})
+def test_target_order_clamps_high_index_to_bottom():
+    pinned = [collection_hub(t, i) for i, t in enumerate(["A", "B", "C"])]
+    assert hubs._target_order(pinned, 0, 9) == ["B", "C", "A"]
+
+
+# --- _realize_order (reverse move-to-top builds any order) ---
+
+def test_realize_order_builds_target_via_move_to_top():
+    section, live = make_reorderable_section(["A", "B", "C", "D"])
+    hubs._realize_order(section, ["C", "A", "D", "B"], dry_run=False)
+    assert [h.title for h in live] == ["C", "A", "D", "B"]
+
+
+def test_realize_order_dry_run_moves_nothing():
+    section, live = make_reorderable_section(["A", "B", "C"])
+    hubs._realize_order(section, ["C", "B", "A"], dry_run=True)
+    assert [h.title for h in live] == ["A", "B", "C"]
+
+
+# --- move() end to end (works past a locked bottom hub) ---
+
+def test_move_reorders_including_below_unanchorable_hub():
+    # 'Locked' is a curated/system-style hub; move-to-top still relocates around it.
+    section, live = make_reorderable_section(["A", "B", "Locked", "C"])
+    plex = make_plex({"Movies": section})
+    hubs.move(plex, "Movies", "A", 3)  # A to the bottom, below 'Locked'
+    assert [h.title for h in live] == ["B", "Locked", "C", "A"]
+
+
+def test_move_dry_run_does_not_reorder():
+    section, live = make_reorderable_section(["A", "B"])
+    plex = make_plex({"Movies": section})
     hubs.move(plex, "Movies", "A", 1, dry_run=True)
-    a.move.assert_not_called()
-
-
-def test_move_past_system_hub_anchors_to_nearest_collection():
-    # slot above the destination is a system hub → Plex can't anchor to it,
-    # so anchor to the nearest collection above instead.
-    c0 = collection_hub("C0", 1)
-    s1 = system_hub("Sys", "movie.recentlyadded")
-    c2, c3 = collection_hub("C2", 2), collection_hub("C3", 3)
-    plex = make_plex({"Movies": make_section([c0, s1, c2, c3])})
-    hubs.move(plex, "Movies", "C3", 2)  # slot above idx2 is s1 → anchor c0
-    c3.move.assert_called_once_with(after=c0)
-
-
-def test_move_with_only_system_hubs_above_goes_to_top():
-    s0 = system_hub("Sys", "movie.recentlyadded")
-    c1 = collection_hub("C1", 1)
-    plex = make_plex({"Movies": make_section([s0, c1])})
-    hubs.move(plex, "Movies", "C1", 1)  # only a system hub above → no anchor → top
-    c1.move.assert_called_once_with(after=None)
+    assert [h.title for h in live] == ["A", "B"]
 
 
 def test_verify_placement_warns_on_mismatch(caplog):

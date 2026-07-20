@@ -87,33 +87,34 @@ def _resolve(pinned: list, target: str) -> int:
     raise HubError(f"No pinned hub matching {target!r}")
 
 
-def _apply_move(pinned: list, from_index: int, to_index: int, dry_run: bool) -> None:
-    """Move the hub at ``from_index`` to ``to_index`` via remove-then-insert.
+def _realize_order(section, ordered_titles: list[str], dry_run: bool) -> None:
+    """Reorder the pinned hubs to match ``ordered_titles`` (top → bottom).
 
-    Plex only accepts *some* hubs as a move anchor: a system hub and certain
-    Plex-curated collection hubs ("Recently Released", "… On Plex") silently
-    reject being an ``after=`` target. So the anchor is the nearest collection
-    hub at or above the destination slot, falling back to the top — and because
-    even a ``custom.collection`` anchor can be silently rejected, the caller
-    verifies the actual landing index afterward (``_verify_placement``) rather
-    than predicting exactness here.
+    Plex's Move Hub API only honors ``move(after=None)`` — move to top — for
+    *every* hub. Anchoring after a specific hub silently fails for system rows
+    and Plex-curated hubs ("Recently Released", "… On Plex"), which otherwise
+    look like ordinary collections. Moving each hub to the top in **reverse**
+    target order therefore builds any arrangement reliably. Re-fetch by title on
+    each step because curated hub identifiers regenerate over time, so a hub
+    object held across moves can go stale and no-op.
     """
-    hub = pinned[from_index]
-    others = [h for i, h in enumerate(pinned) if i != from_index]
-    to_index = max(0, min(to_index, len(others)))
-
-    anchor = None
-    for j in range(to_index - 1, -1, -1):
-        if _is_collection(others[j]):
-            anchor = others[j]
-            break
-
     if dry_run:
-        log.info("[dry-run] move %r toward index %d (anchor %r)",
-                 getattr(hub, "title", ""), to_index, getattr(anchor, "title", None))
+        log.info("[dry-run] set order: %s", ", ".join(ordered_titles))
         return
+    for title in reversed(ordered_titles):
+        section.reload()
+        hub = next((h for h in _pinned_hubs(section) if getattr(h, "title", "") == title), None)
+        if hub is not None:
+            hub.move(after=None)
 
-    hub.move(after=anchor)
+
+def _target_order(pinned: list, from_index: int, to_index: int) -> list[str]:
+    """Title order with the hub at ``from_index`` repositioned to ``to_index``."""
+    titles = [getattr(h, "title", "") for h in pinned]
+    moving = titles.pop(from_index)
+    to_index = max(0, min(to_index, len(titles)))
+    titles.insert(to_index, moving)
+    return titles
 
 
 def _verify_placement(section, title: str, requested: int) -> int | None:
@@ -194,7 +195,8 @@ def pin(plex: PlexServer, library: str, title: str, to_index: int | None = None,
     if to_index is not None:
         section.reload()
         pinned = _pinned_hubs(section)
-        _apply_move(pinned, _resolve(pinned, title), to_index, dry_run=False)
+        order = _target_order(pinned, _resolve(pinned, title), to_index)
+        _realize_order(section, order, dry_run=False)
         actual = _verify_placement(section, title, to_index)
         if actual is not None:
             log.info("Placed %r at index %d in %r", title, actual, library)
@@ -220,6 +222,7 @@ def move(plex: PlexServer, library: str, target: str, to_index: int, dry_run: bo
     pinned = _pinned_hubs(section)
     idx = _resolve(pinned, target)
     title = getattr(pinned[idx], "title", "")
-    _apply_move(pinned, idx, to_index, dry_run)
+    order = _target_order(pinned, idx, to_index)
+    _realize_order(section, order, dry_run)
     if not dry_run:
         _verify_placement(section, title, to_index)
