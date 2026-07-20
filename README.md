@@ -1,126 +1,113 @@
-[![Build Status](https://scrutinizer-ci.com/g/jl94x4/ColleXions/badges/build.png?b=main)](https://scrutinizer-ci.com/g/jl94x4/ColleXions/build-status/main) [![Scrutinizer Code Quality](https://scrutinizer-ci.com/g/jl94x4/ColleXions/badges/quality-score.png?b=main)](https://scrutinizer-ci.com/g/jl94x4/ColleXions/?branch=main)
+# Plex Home — Plex Collection Pinner
 
-# WEB UI VERSION NOW AVAILABLE
+Plex Home is a Python daemon that automatically manages which collections are **pinned** (promoted to the home screen) on a Plex Media Server.
 
-https://github.com/jl94x4/ColleXions-WebUI
+Every cycle it resolves an ordered list of home-screen **slots** — each slot is either a fixed collection or a **pick** that chooses the first eligible collection from a list of named groups — then fully manages the home screen: it pins the resolved set, unpins every other promoted collection, and reorders the pinned hubs to match slot order. It logs to stdout and optionally POSTs a per-cycle summary to a webhook.
 
-# ColleXions
-ColleXions automates the process of pinning collections to your Plex home screen, making it easier to showcase your favorite content. With customizable features, it enhances your Plex experience by dynamically adjusting what is displayed either controlled or completely randomly - the choice is yours.
-Version 1.11-1.16 includes collaboration with @[defluophoenix](https://github.com/jl94x4/ColleXions/commits?author=defluophoenix)
+It also ships an imperative CLI (`list` / `pin` / `unpin` / `move`) for driving the live home screen by hand, independent of the config.
 
-## Key Features
-- **Randomized Pinning:** ColleXions randomly selects collections to pin each cycle, ensuring that your home screen remains fresh and engaging. This randomness prevents the monotony of static collections, allowing users to discover new content easily.
+## How it works
 
-- **Special Occasion Collections:** Automatically prioritizes collections linked to specific dates, making sure seasonal themes are highlighted when appropriate.
+- **Ordered slots, not a random pool.** You declare the home screen as an ordered list. Slot 1 is the first hub, slot 2 the second, and so on — Plex Home moves the pinned hubs into exactly that order each cycle.
+- **Fixed or pick per slot.** A fixed slot always pins one named collection. A pick slot walks a priority list of groups and stops at the first group that has an eligible, non-repeat-blocked, not-already-used collection, then pins one of that group's collections at random.
+- **Groups scope collections and when they apply.** A group targets one library and can be gated by a date window (e.g. `10-01/10-31` for October), a time-of-day window, label filters, and collection include/exclude lists.
+- **Repeat blocking.** A pinned collection is blocked from re-pinning for `repeat_block_hours` so the home screen stays varied.
+- **Sole manager of the home screen.** Anything promoted by other means that isn't in the resolved set is unpinned each cycle — there is no exclusion list.
 
-- **Exclusion List:** Users can specify collections to exclude from pinning, ensuring that collections you don't want to see on the home screen are never selected. This is also useful if you manually pin items to your homescreen and do not want this tool to interfere with those.
-
-- **Regex Filtered Exclusion:** Uses regex to filter out keywords that are specified in the config file, ColleXions will automatically exclude any collection that have the specific keyword listed in the title.
-
-- **Inclusion List:** Users can specify collections to include from pinning, ensuring full control over the collections you see on your home screen.
-
-- **Label Support:** Collexions will add a label (user defined in config) to each collection that is pinned, and will remove the collection when unpinned. This is great for Kometa support with labels.
-
-- **Customizable Settings:** Users can easily adjust library names, pinning intervals, and the number of collections to pin, tailoring the experience to their preferences.
-
-- **Categorize Collections:** Users can put collections into categories to ensure a variety of collection are chosen if some are too similar
-
-- **Collection History:** Collections are remembered so they don't get chosen too often
-
-- **Item Collection Limits:** Use `"min_items_for_pinning": 10,` to make any collections with a lower amount of items in the collection be automatically excluded from selection for pinning. 
-
-## Category Processing:
-
-- If ```always_call``` is set to ```true```, the script will attempt to pin one collection from each category at all times, as long as there are available slots.
-
-- If ```always_call``` is set to ```false```, the script randomly decides for each category whether to pin a collection from the category. If it chooses to pin, it will only pick one collection per category.
-
-> [!TIP]
-> If you have more than 20 collections per category it is recommended to use ```true```
-
-## **NEW** Regex Keyword Filtering
-
-- **Regex Filter:** Collexions now includes an option inside the config to filter out key words for collections to be excluded from being selected for being pinned. An example of this would be a Movie collection, such as "The Fast & The Furious Collection, The Mean Girls Collection and "The Matrix Collection" - by using the word "Collection" as a regex filter it would make all collections using this word be excluded from being able to be selected for pinning. Please see updated Config file new section!
-
-## Include & Exclude Collections
-
-- **Exclude Collections:** The exclusion list allows you to specify collections that should never be pinned or unpinned by ColleXions. These collections are "blacklisted," meaning that even if they are randomly selected or included in the special collections, they will be skipped, any collections you have manually pinned that are in this list will not be unpinned either. This is especially useful if you have "Trending" collections that you wish to be pinned to your home screen at all times.
-
-- **Include Collections:** The inclusion list is the opposite of the exclusion list. It allows you to specify exactly which collections should be considered for pinning. This gives you control over which collections can be pinned, filtering the selection to only a few curated options. Make sure ```"use_inclusion_list": false,``` is set appropriately for your use case.
-
-## How Include & Exclude Work Together 
-
-- If the inclusion list is enabled (i.e., use_inclusion_list is set to True), ColleXions will only pick collections from the inclusion list. Special collections are added if they are active during the date range.
-
-- If no inclusion list is provided, ColleXions will attempt to pick collections randomly from the entire library while respecting the exclusion list. The exclusion list is always active and prevents specific collections from being pinned.
-
-- If the inclusion list is turned off or not defined (use_inclusion_list is set to False or missing), the exclusion list will still be honored, ensuring that any collections in the exclusion list are never pinned.
-
-## Collection Priority Enforcement
-
-The ColleXions tool organizes pinned collections based on a defined priority system to ensure important or seasonal collections are featured prominently:
-
-- **Special Collections First:** Collections marked as special (e.g., seasonal or themed collections) are prioritized and pinned first, these typically are collections that have a start and an end date.
-
-- **Category-Based Collections:** After special collections are pinned, ColleXions will then fill any remaining slots with collections from specified categories, if defined in the config.
-
-- **Random Selections:** If there are still available slots after both special and category-based collections have been selected, random collections from each library are pinned to fill the remaining spaces.
-
-If no special collections or categories are defined, ColleXions will automatically fill all slots with random collections, ensuring your library's home screen remains populated with the amounts specified in your config.
-
-## Selected Collections
-
-A file titled ``selected_collections.json`` is created on first run and updated each run afterwards and keeps track of what's been selected to ensure collections don't get picked repeatedly leaving other collections not being pinned as much. This can be configured in the config under ```"repeat_block_hours": 12,``` - this is the amount of time between the first pin, and the amount of hours until the pinned collection can be selected again. Setting this to a high value may mean that you run out of collections to pin.
-
-## Docker Install
+## Install
 
 ```
- docker run -d \
-  --name=collexions \
-  --restart=unless-stopped \
-  -e TZ="Your/Timezone" \
-  -v /path/to/your/appdata/collexions:/app \
-  jl94x4/collexions:latest
+pip install -e .
 ```
 
-## Script Install
-Extract the files in the location you wish to run it from
+This registers the `plex-home` console command. Without installing, the equivalent is `python -m plex_home` with `src/` on `PYTHONPATH`.
 
-Run ```pip install -r requirements.txt``` to install dependencies
+## Running the daemon
 
-Update the ```config.json``` file with your Plex URL, token, library names, and exclusion/inclusion lists. 
+```
+plex-home run [--config config.yaml]
+```
 
-Run ```python3 ColleXions.py```
+`run` reloads the config at the start of every cycle (edits take effect without a restart), reconciles the home screen to the config, then sleeps `interval_minutes`. It runs forever; Ctrl-C (SIGINT) triggers a clean shutdown after the current sleep. Logging is stdout only — no log file.
 
-> [!CAUTION]
-> You should never share your Plex token with anyone else.
+## CLI — live home-screen control
 
-Download the ```config.json``` and edit to your liking
+`list` / `pin` / `unpin` / `move` operate on the live Plex home screen imperatively, independent of the config. The home screen is treated as a per-library, indexed list of pinned hubs (system and collection hubs alike). A running daemon reconciles the home back to the config, so CLI changes are ephemeral against it.
 
-https://github.com/jl94x4/ColleXions/blob/main/config.json
+```
+plex-home list  [--library NAME] [--available] [--json]
+plex-home pin   "Title" [--library NAME] [--to K | --to-top] [--dry-run]
+plex-home unpin <index|Title> --library NAME [--dry-run]
+plex-home move  <index|Title> --library NAME (--to K | --up [N] | --down [N] | --to-top | --to-bottom) [--dry-run]
+```
 
-> [!TIP]
-> pinning_interval is in minutes
+`--dry-run` prints the intended operation without calling Plex. Index targets are per-library, so `--library` is required for index-based `unpin`/`move`; title targets auto-resolve across configured libraries (error on collision).
 
-## Discord Webhooks (optional)
+## Configuration
 
-ColleXions now includes a Discord Webhook Integration feature. This enhancement enables real-time notifications directly to your designated Discord channel whenever a collection is pinned to the Home and Friends' Home screens.
+All runtime behaviour is a YAML config (default `config.yaml`, overridable with the global `--config` flag), reloaded each cycle.
 
-**Configuration:** Include your Discord webhook URL in the ```config.json``` file.
+```yaml
+plex_url: http://192.168.1.x:32400
+plex_token: xxxxxxxxxxxx
+library_names: [Movies, TV Shows]
 
-**Notifications:** Every time a collection is successfully pinned, the tool sends a formatted message to the specified Discord channel, highlighting the collection name in bold.
+cadence:
+  interval_minutes: 180
+  repeat_block_hours: 12
+  min_items_for_pinning: 10
 
-**Pinned Collection Item Count:** See item count for each collection that was selected for pinning. 
+webhook_url: https://discord.com/api/webhooks/...   # optional
 
-This feature helps you keep track of which collections are being pinned, allowing for easy monitoring and tweaks to ensure diversity and relevance.
+groups:
+  halloween:
+    library: Movies
+    date: 10-01/10-31
+    include_labels: [Horror]
+  staff-picks:
+    library: Movies
+    include_collections: [A24, Studio Ghibli]
 
-## Logging
+home:
+  - collection: Trending Movies       # fixed slot — always this collection
+  - pick: [halloween, staff-picks]    # first eligible group wins
+```
 
-After every run ```collexions.log``` will be created with a full log of the last successful run. It will be overwritten on each new run.
+| Key | Purpose |
+|-----|---------|
+| `plex_url`, `plex_token` | Plex server URL and auth token (required) |
+| `library_names` | Libraries to manage (required) |
+| `cadence` | `interval_minutes` (required), `repeat_block_hours` (default 24), `min_items_for_pinning` (default 10) |
+| `groups` | Named collection groups a `pick` slot draws from — each with a `library` and optional `date`/`time`/`include_labels`/`include_collections`/`exclude_labels`/`exclude_collections` and per-group cadence overrides |
+| `home` | Ordered list of slots — each a `{collection: "<title>"}` or `{pick: [<group>, ...]}` |
+| `webhook_url` | Optional; POSTs a per-cycle summary of pinned titles |
+
+> Never share your Plex token. Keep real credentials out of committed files.
+
+## Docker
+
+```
+docker build -t plex-home .
+docker run -d \
+  -v $(pwd)/config.yaml:/app/config.yaml \
+  plex-home
+```
+
+The image installs the package and runs `plex-home run`. Logs go to stdout — read them with `docker logs`.
+
+## Development
+
+```
+pip install -e .
+.venv/bin/pytest        # pyproject sets pythonpath=src, so no install is needed to run tests
+```
+
+Modules live in `src/plex_home/`; tests in `tests/`. See `CLAUDE.md` for the module map and design notes, and `docs/adr/` for architecture decisions.
 
 ## Acknowledgments
-Thanks to the PlexAPI library and the open-source community for their support.
-Thanks to defluophoenix for the additional work they've done on this
+
+Plex Home builds on [ColleXions](https://github.com/jl94x4/ColleXions) by jl94x4, and the PlexAPI library and open-source community.
 
 ## License
-This project is licensed under the MIT License.
+
+MIT — see `LICENSE`.
