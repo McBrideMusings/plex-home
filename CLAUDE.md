@@ -4,15 +4,27 @@ ColleXions is a Python daemon that automatically rotates which collections are "
 
 ## Running
 
-### Bare Python
+`main.py` is the single entrypoint, with subcommands: `run` (the daemon) plus a live-control CLI (`list`, `pin`, `unpin`, `move`). A global `--config` flag (default `config.yaml`) supplies the Plex connection for every subcommand.
+
+### Daemon
 ```
 pip install -r requirements.txt
-python main.py [config.yaml]
+python main.py run [--config config.yaml]
 ```
-`main.py` is the entrypoint. The config path is a positional argument that defaults to `config.yaml`. The config is reloaded at the start of every cycle, so edits take effect without a restart. The loop runs forever; interrupt with Ctrl-C — SIGINT triggers a clean shutdown after the current sleep finishes. Logging goes to stdout only (there is no log file).
+`run` reloads the config at the start of every cycle (so edits take effect without a restart), reconciles the home screen to the config, then sleeps `interval_minutes`. It runs forever; interrupt with Ctrl-C — SIGINT triggers a clean shutdown after the current sleep. Logging goes to stdout only (there is no log file).
+
+### CLI — live home-screen control (ADR-0005)
+`list` / `pin` / `unpin` / `move` operate on the live Plex home screen **imperatively**, independent of the config. The home screen is treated as a per-library, indexed list of pinned hubs (system and collection hubs alike). A running daemon reconciles the home back to the config, so CLI changes are ephemeral against it.
+```
+python main.py list  [--library NAME] [--available] [--json]
+python main.py pin   "Title" [--library NAME] [--to K | --to-top] [--dry-run]
+python main.py unpin <index|Title> --library NAME [--dry-run]
+python main.py move  <index|Title> --library NAME (--to K | --up [N] | --down [N] | --to-top | --to-bottom) [--dry-run]
+```
+`--dry-run` prints the intended operation without calling Plex. Index targets are per-library, so `--library` is required for index-based `unpin`/`move`; title targets auto-resolve across configured libraries (error on collision). Plex drops a fresh `pin` at a Plex-determined position (observed mid-list), so use `--to K` for explicit placement.
 
 ### Docker
-The committed `Dockerfile` still `COPY`s and runs lowercase `collexions.py`, which no longer exists — **update its `COPY` and `CMD` to `main.py` before building.** The runnable entrypoint is `main.py`; mount the YAML config, and read logs via `docker logs` (the app logs to stdout, not a file):
+The container runs the daemon (`CMD ["python", "main.py", "run"]`). Mount the YAML config; read logs via `docker logs` (stdout, no file):
 ```
 docker build -t collexions .
 docker run -d \
@@ -22,7 +34,7 @@ docker run -d \
 
 ## Configuration (`config.yaml`)
 
-All runtime behaviour is controlled by a YAML config (default path `config.yaml`, overridable as the positional CLI argument). It is reloaded at the start of every cycle, so changes take effect without a restart. Parsed and validated by `config.py`, which raises `ConfigError` with a human-readable message on any problem.
+All runtime behaviour is controlled by a YAML config (default path `config.yaml`, overridable with the global `--config` flag). It is reloaded at the start of every cycle, so changes take effect without a restart. Parsed and validated by `config.py`, which raises `ConfigError` with a human-readable message on any problem.
 
 ### Top-level keys
 
@@ -109,7 +121,9 @@ home:
 | `pinning.py` | Pin/unpin engine — fully manages the home screen (ADR-0002): pins resolved collections, unpins everything else, updates repeat-block history |
 | `ordering.py` | Hub ordering — reorders home-screen managed hubs to match the resolved slot order via the Plex Move Hub API (`ManagedHub.move`) |
 | `webhook.py` | Optional webhook notifier — POSTs a per-cycle summary (pinned titles + timestamp) when `webhook_url` is configured; never raises |
-| `main.py` | Main loop + CLI entrypoint — reloads config each cycle, wires fetch → resolve → pin → order → webhook, sleeps `interval_minutes`, clean SIGINT shutdown, per-cycle error retry |
+| `main.py` | Single entrypoint — builds the subcommand parser and dispatches: `run` → the daemon loop (reload config each cycle, fetch → resolve → pin → order → webhook, sleep, clean SIGINT shutdown, per-cycle error retry); `list`/`pin`/`unpin`/`move` → the CLI handlers |
+| `hubs.py` | Imperative managed-hub layer for the CLI (ADR-0005) — lists pinned hubs per library as an indexed order, and pins/unpins/moves them via `ManagedHub` (system + collection uniform); never touches the config |
+| `cli.py` | CLI subcommand parsing, library resolution, relative-move math, and table/JSON output for `list`/`pin`/`unpin`/`move` |
 | `test_config.py` | Pytest suite for config loader (run with `.venv/bin/pytest`) |
 | `test_history.py` | Pytest suite for repeat-block history |
 | `test_eligibility.py` | Pytest suite for group eligibility engine |
@@ -118,7 +132,9 @@ home:
 | `test_pinning.py` | Pytest suite for pin/unpin engine (fully mocked) |
 | `test_ordering.py` | Pytest suite for hub ordering (fully mocked) |
 | `test_webhook.py` | Pytest suite for the webhook notifier (fully mocked) |
-| `test_main.py` | Pytest suite for the main loop + run_cycle wiring (fully mocked) |
+| `test_main.py` | Pytest suite for the main loop + run_cycle wiring + subcommand dispatch (fully mocked) |
+| `test_hubs.py` | Pytest suite for the managed-hub operations layer (fully mocked) |
+| `test_cli.py` | Pytest suite for CLI parsing, handlers, and output (fully mocked) |
 | `ColleXions.py` | Original monolithic script — reference only, superseded by `main.py` + the modules above; not run |
 | `config.json` | Old flat JSON config from the original script — reference only; the current entrypoint reads YAML |
 | `config.yaml` | Runtime YAML config read by `main.py` (path overridable via the CLI arg) — user-provided, not committed with real credentials |

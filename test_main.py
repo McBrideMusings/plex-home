@@ -106,7 +106,7 @@ def test_main_runs_one_cycle_then_exits():
          patch("main.run_cycle", side_effect=stop_after) as cycle, \
          patch("main._interruptible_sleep"), \
          patch("main.signal.signal"):
-        rc = main.main(["config.yaml"])
+        rc = main.main(["run"])
     assert rc == 0
     load.assert_called_once()
     cycle.assert_called_once()
@@ -125,7 +125,7 @@ def test_main_reloads_config_each_cycle():
          patch("main.run_cycle", return_value=[]), \
          patch("main._interruptible_sleep"), \
          patch("main.signal.signal"):
-        main.main([])
+        main.main(["run"])
     assert seen["n"] == 2
 
 
@@ -142,7 +142,7 @@ def test_main_config_error_sleeps_and_retries_without_running_cycle():
          patch("main.run_cycle") as cycle, \
          patch("main._interruptible_sleep") as sleep, \
          patch("main.signal.signal"):
-        main.main([])
+        main.main(["run"])
     cycle.assert_not_called()
     sleep.assert_called_once_with(main.CONFIG_ERROR_RETRY_MINUTES)
 
@@ -156,7 +156,39 @@ def test_main_cycle_error_does_not_crash_loop():
          patch("main.run_cycle", side_effect=boom_then_stop), \
          patch("main._interruptible_sleep") as sleep, \
          patch("main.signal.signal"):
-        rc = main.main([])
+        rc = main.main(["run"])
     assert rc == 0
     # still slept the normal interval after the failed cycle
     sleep.assert_called_once_with(30)
+
+
+def test_main_dispatches_subcommand_to_handler():
+    handler = MagicMock(return_value=0)
+    with patch("main.load_config", return_value=make_config()), \
+         patch("main.connect", return_value=MagicMock()), \
+         patch("cli.HANDLERS", {"list": handler}):
+        rc = main.main(["list"])
+    assert rc == 0
+    handler.assert_called_once()
+
+
+def test_main_command_config_error_returns_2():
+    with patch("main.load_config", side_effect=ConfigError("bad")):
+        rc = main.main(["list"])
+    assert rc == 2
+
+
+def test_main_command_connect_error_returns_2():
+    with patch("main.load_config", return_value=make_config()), \
+         patch("main.connect", side_effect=RuntimeError("no plex")):
+        rc = main.main(["list"])
+    assert rc == 2
+
+
+def test_main_command_hub_error_returns_1():
+    from hubs import HubError
+    with patch("main.load_config", return_value=make_config()), \
+         patch("main.connect", return_value=MagicMock()), \
+         patch("cli.HANDLERS", {"list": MagicMock(side_effect=HubError("boom"))}):
+        rc = main.main(["list"])
+    assert rc == 1

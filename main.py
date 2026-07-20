@@ -1,12 +1,13 @@
 from __future__ import annotations
-import argparse
 import logging
 import signal
 import time
 from datetime import datetime, timezone
 
+import cli
 from config import load_config, ConfigError, Config
 from plex_client import connect, fetch_collections
+from hubs import HubError
 from history import load_history, save_history
 from resolver import resolve_slots
 from pinning import apply_pins
@@ -62,27 +63,15 @@ def _interruptible_sleep(minutes: float) -> None:
         time.sleep(1)
 
 
-def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    parser = argparse.ArgumentParser(description="ColleXions — Plex collection pinner")
-    parser.add_argument(
-        "config",
-        nargs="?",
-        default="config.yaml",
-        help="Path to the YAML config file (default: config.yaml)",
-    )
-    args = parser.parse_args(argv)
-
+def run_daemon(config_path: str) -> int:
+    """Run the pinning daemon: reload config each cycle, reconcile, sleep, repeat."""
     signal.signal(signal.SIGINT, _handle_sigint)
-    log.info("ColleXions starting — config: %s", args.config)
+    log.info("ColleXions starting — config: %s", config_path)
 
     while _running:
         # Reload config every cycle so edits take effect without a restart.
         try:
-            config = load_config(args.config)
+            config = load_config(config_path)
         except ConfigError as e:
             log.error("Config error: %s — retrying in %d min", e, CONFIG_ERROR_RETRY_MINUTES)
             _interruptible_sleep(CONFIG_ERROR_RETRY_MINUTES)
@@ -98,6 +87,36 @@ def main(argv: list[str] | None = None) -> int:
 
     log.info("ColleXions stopped cleanly.")
     return 0
+
+
+def _run_command(args) -> int:
+    """Load config, connect to Plex, and dispatch a one-shot CLI subcommand."""
+    try:
+        config = load_config(args.config)
+    except ConfigError as e:
+        log.error("Config error: %s", e)
+        return 2
+    try:
+        plex = connect(config.plex_url, config.plex_token)
+    except Exception as e:
+        log.error("Could not connect to Plex: %s", e)
+        return 2
+    try:
+        return cli.HANDLERS[args.command](plex, config, args)
+    except HubError as e:
+        log.error("%s", e)
+        return 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    args = cli.build_parser().parse_args(argv)
+    if args.command == "run":
+        return run_daemon(args.config)
+    return _run_command(args)
 
 
 if __name__ == "__main__":

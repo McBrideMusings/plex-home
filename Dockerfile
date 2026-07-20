@@ -18,9 +18,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy the application modules into the container at /app
-COPY main.py config.py eligibility.py plex_client.py history.py resolver.py pinning.py ordering.py webhook.py ./
+COPY main.py cli.py hubs.py config.py eligibility.py plex_client.py history.py resolver.py pinning.py ordering.py webhook.py ./
 
 # Define the command to run the daemon when the container starts.
+# main.py has subcommands (run/list/pin/unpin/move); the container runs the daemon.
 # The YAML config is mounted at runtime (e.g. -v $(pwd)/config.yaml:/app/config.yaml);
 # logs go to stdout, so no logs directory is needed.
-CMD ["python", "main.py"]
+CMD ["python", "main.py", "run"]
