@@ -16,7 +16,7 @@ def make_collection(title: str, promoted: bool, labels: list[str] | None = None)
     coll.title = title
     coll.labels = [make_label(t) for t in (labels or [])]
     hub = MagicMock()
-    hub._promoted = promoted
+    hub.promotedToOwnHome = promoted
     coll.visibility.return_value = hub
     coll._hub = hub  # test convenience accessor
     return coll

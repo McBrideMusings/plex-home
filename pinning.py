@@ -69,7 +69,7 @@ def apply_pins(
             continue
         live_by_title[title] = coll
         try:
-            if coll.visibility()._promoted:
+            if coll.visibility().promotedToOwnHome:
                 promoted_titles.add(title)
         except Exception as e:
             log.error("Could not read promotion state for %r: %s", title, e)
