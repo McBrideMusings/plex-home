@@ -62,6 +62,7 @@ def apply_pins(
     result = PinResult(history=dict(history))
 
     live_by_title: dict[str, object] = {}
+    hub_by_title: dict[str, object] = {}
     promoted_titles: set[str] = set()
     for coll in _iter_live_collections(plex, library_names):
         title = getattr(coll, "title", None)
@@ -69,10 +70,13 @@ def apply_pins(
             continue
         live_by_title[title] = coll
         try:
-            if coll.visibility().promotedToOwnHome:
-                promoted_titles.add(title)
+            hub = coll.visibility()
         except Exception as e:
             log.error("Could not read promotion state for %r: %s", title, e)
+            continue
+        hub_by_title[title] = hub
+        if hub.promotedToOwnHome or hub.promotedToSharedHome:
+            promoted_titles.add(title)
 
     to_pin = [t for t in resolved if t not in promoted_titles]
     to_unpin = [t for t in promoted_titles if t not in resolved_set]
@@ -84,7 +88,7 @@ def apply_pins(
             result.missing.append(title)
             continue
         try:
-            hub = coll.visibility()
+            hub = hub_by_title.get(title) or coll.visibility()
             hub.promoteHome()
             hub.promoteShared()
             if label:
@@ -102,7 +106,7 @@ def apply_pins(
         if coll is None:
             continue
         try:
-            hub = coll.visibility()
+            hub = hub_by_title.get(title) or coll.visibility()
             if label:
                 try:
                     current = [lbl.tag for lbl in (coll.labels or [])]

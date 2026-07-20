@@ -17,6 +17,7 @@ def make_collection(title: str, promoted: bool, labels: list[str] | None = None)
     coll.labels = [make_label(t) for t in (labels or [])]
     hub = MagicMock()
     hub.promotedToOwnHome = promoted
+    hub.promotedToSharedHome = promoted
     coll.visibility.return_value = hub
     coll._hub = hub  # test convenience accessor
     return coll
@@ -158,6 +159,26 @@ def test_multiple_libraries_managed_together():
     result = pinning.apply_pins(plex, ["Movies", "TV Shows"], ["MoviePin"], "Pinned", {})
     assert result.pinned == ["MoviePin"]
     assert result.unpinned == ["TVStale"]
+
+
+def test_shared_promoted_counts_as_promoted():
+    # own-home off but shared-home on (external tampering / divergence):
+    # still counts as promoted so an unresolved collection gets swept.
+    coll = make_collection("Divergent", promoted=False)
+    coll._hub.promotedToSharedHome = True
+    plex = make_plex({"Movies": make_section([coll])})
+    result = pinning.apply_pins(plex, ["Movies"], [], "Pinned", {})
+    coll._hub.demoteHome.assert_called_once()
+    coll._hub.demoteShared.assert_called_once()
+    assert result.unpinned == ["Divergent"]
+
+
+def test_visibility_read_once_per_collection():
+    # fix 1: read visibility a single time per collection, reuse for the pin op.
+    coll = make_collection("Once", promoted=False)
+    plex = make_plex({"Movies": make_section([coll])})
+    pinning.apply_pins(plex, ["Movies"], ["Once"], "Pinned", {})
+    coll.visibility.assert_called_once()
 
 
 def test_promotion_state_read_error_treated_as_not_promoted():
