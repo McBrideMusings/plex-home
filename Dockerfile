@@ -17,12 +17,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy the script into the container at /app
-COPY collexions.py .
+# Copy the application modules into the container at /app
+COPY main.py config.py eligibility.py plex_client.py history.py resolver.py pinning.py ordering.py webhook.py ./
 
-# Create the logs directory within the container (volume mount will overlay this)
-RUN mkdir logs
-
-# Define the command to run your script when the container starts
-# This assumes collexions.py is in the root of /app
-CMD ["python", "collexions.py"]
+# Define the command to run the daemon when the container starts.
+# The YAML config is mounted at runtime (e.g. -v $(pwd)/config.yaml:/app/config.yaml);
+# logs go to stdout, so no logs directory is needed.
+CMD ["python", "main.py"]
