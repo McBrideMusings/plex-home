@@ -34,9 +34,12 @@ class HubView:
     config_managed: bool  # collection reachable from the config's slots/groups
 
 
+def _is_collection(hub: object) -> bool:
+    return (getattr(hub, "identifier", "") or "").startswith(_COLLECTION_ID_PREFIX)
+
+
 def _kind(hub: object) -> str:
-    identifier = getattr(hub, "identifier", "") or ""
-    return "collection" if identifier.startswith(_COLLECTION_ID_PREFIX) else "system"
+    return "collection" if _is_collection(hub) else "system"
 
 
 def _is_pinned(hub: object) -> bool:
@@ -85,16 +88,42 @@ def _resolve(pinned: list, target: str) -> int:
 
 
 def _apply_move(pinned: list, from_index: int, to_index: int, dry_run: bool) -> None:
-    """Move the hub at ``from_index`` to ``to_index`` via remove-then-insert."""
+    """Move the hub at ``from_index`` to ``to_index`` via remove-then-insert.
+
+    Plex only accepts a *collection* hub (or the top) as a move anchor — a
+    system-hub identifier is silently rejected. So the anchor is the nearest
+    collection hub at or above the destination slot, falling back to the top.
+    When the slot directly above the destination is a system hub, exact index
+    placement is unreachable (you cannot anchor after a system hub): the hub
+    lands just above that system hub instead, and the shortfall is logged.
+    """
     hub = pinned[from_index]
     others = [h for i, h in enumerate(pinned) if i != from_index]
     to_index = max(0, min(to_index, len(others)))
-    after = None if to_index == 0 else others[to_index - 1]
+
+    anchor = None
+    for j in range(to_index - 1, -1, -1):
+        if _is_collection(others[j]):
+            anchor = others[j]
+            break
+    # Exact iff the slot directly above the destination is the anchor (a collection),
+    # or the destination is the top.
+    exact = to_index == 0 or (anchor is not None and anchor is others[to_index - 1])
+
     if dry_run:
-        log.info("[dry-run] move %r to index %d (after %r)",
-                 getattr(hub, "title", ""), to_index, getattr(after, "title", None))
+        note = "" if exact else " (approx — anchored to nearest collection past a system hub)"
+        log.info("[dry-run] move %r to index %d, after %r%s",
+                 getattr(hub, "title", ""), to_index, getattr(anchor, "title", None), note)
         return
-    hub.move(after=after)
+
+    hub.move(after=anchor)
+    if not exact:
+        log.warning(
+            "Moved %r after nearest collection %r — index %d sits just after a system hub, "
+            "which Plex cannot anchor to, so it was positioned above that hub instead. "
+            "To place it there, move the hub currently above it downward instead.",
+            getattr(hub, "title", ""), getattr(anchor, "title", None), to_index,
+        )
 
 
 def list_pinned(plex: PlexServer, library_names: list[str], config: Config) -> dict[str, list[HubView]]:

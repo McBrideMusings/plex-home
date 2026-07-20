@@ -170,6 +170,25 @@ def test_move_dry_run_does_not_call_move():
     a.move.assert_not_called()
 
 
+def test_move_past_system_hub_anchors_to_nearest_collection():
+    # slot above the destination is a system hub → Plex can't anchor to it,
+    # so anchor to the nearest collection above instead.
+    c0 = collection_hub("C0", 1)
+    s1 = system_hub("Sys", "movie.recentlyadded")
+    c2, c3 = collection_hub("C2", 2), collection_hub("C3", 3)
+    plex = make_plex({"Movies": make_section([c0, s1, c2, c3])})
+    hubs.move(plex, "Movies", "C3", 2)  # slot above idx2 is s1 → anchor c0
+    c3.move.assert_called_once_with(after=c0)
+
+
+def test_move_with_only_system_hubs_above_goes_to_top():
+    s0 = system_hub("Sys", "movie.recentlyadded")
+    c1 = collection_hub("C1", 1)
+    plex = make_plex({"Movies": make_section([s0, c1])})
+    hubs.move(plex, "Movies", "C1", 1)  # only a system hub above → no anchor → top
+    c1.move.assert_called_once_with(after=None)
+
+
 def test_locate_returns_index_and_count():
     a, b, c = (collection_hub("A", 1), collection_hub("B", 2), collection_hub("C", 3))
     plex = make_plex({"Movies": make_section([a, b, c])})
