@@ -119,20 +119,19 @@ home:
 | `test_ordering.py` | Pytest suite for hub ordering (fully mocked) |
 | `test_webhook.py` | Pytest suite for the webhook notifier (fully mocked) |
 | `test_main.py` | Pytest suite for the main loop + run_cycle wiring (fully mocked) |
-| `ColleXions.py` | Original script (reference only — being superseded by the rewrite) |
-| `config.json` | Runtime configuration (not committed with real credentials) |
-| `requirements.txt` | Python dependencies (`plexapi`, `requests`, plus unused stubs) |
-| `Dockerfile` | Container build; uses `python:3.12-slim-bullseye` |
-| `collexions_template.xml` | Plex XML template (reference/documentation artifact, not used by the script) |
-| `selected_collections.json` | Auto-generated at runtime; tracks pinning history for recency blocking |
-| `logs/collexions.log` | Auto-generated at runtime; overwritten each process start (mode `'w'`) |
+| `ColleXions.py` | Original monolithic script — reference only, superseded by `main.py` + the modules above; not run |
+| `config.json` | Old flat JSON config from the original script — reference only; the current entrypoint reads YAML |
+| `config.yaml` | Runtime YAML config read by `main.py` (path overridable via the CLI arg) — user-provided, not committed with real credentials |
+| `requirements.txt` | Python dependencies — `plexapi`, `requests`, `pyyaml` are imported; `Werkzeug`, `schedule`, `psutil` are unused leftovers |
+| `Dockerfile` | Container build (`python:3.12-slim-bullseye`); still COPYs/runs the old `collexions.py` — update to `main.py` before building (see Running) |
+| `collexions_template.xml` | Plex XML template (reference/documentation artifact, not used by the code) |
+| `pin_history.json` | Auto-generated at runtime by `history.py`; maps pinned collection title → last-pinned UTC timestamp for recency blocking. Delete to reset |
 
 ## Gotchas
 
-- **Log file is truncated on each restart** — `FileHandler` opens with `mode='w'`. There is no log rotation; disk usage is bounded but history is lost.
-- **`selected_collections.json` is mutable state** — delete it to reset the recency-block history. The script handles a missing or corrupt file gracefully.
-- **Dockerfile COPY uses lowercase** (`collexions.py`) but the repo file is `ColleXions.py`. On Linux containers this will fail silently at build time if the casing doesn't match.
-- **`requirements.txt` includes unused packages** (`Werkzeug`, `schedule`, `pyyaml`, `psutil`) — likely leftovers from earlier iterations. Only `plexapi` and `requests` are actually imported.
-- **Config is validated on load** — missing `collexions_label` defaults to `'Pinned by Collexions'` with a warning; missing `plex_url`, `plex_token`, or `pinning_interval` causes `sys.exit(1)`.
-- **`categories` config is mutated in place** — `select_from_categories` pops and re-inserts `always_call` from the dict. This is safe in the current single-threaded loop but fragile if the structure is ever shared.
-- **Unpin scope is all promoted collections** — any collection promoted by other means (manually in Plex) will be unpinned each cycle unless its title is in `exclusion_list`.
+- **Logging is stdout-only** — `main.py` calls `logging.basicConfig` with no file handler, so there is no log file to rotate or truncate. Under Docker, read logs via `docker logs`.
+- **`pin_history.json` is mutable state** — `history.py` rewrites it each cycle (collection title → last-pinned UTC timestamp). Delete it to reset the recency-block history; a missing or corrupt file is handled gracefully (starts fresh).
+- **Dockerfile COPY/CMD reference `collexions.py`** — that lowercase file does not exist (the entrypoint is `main.py`), so the container fails until the `COPY` and `CMD` are updated. On a case-insensitive filesystem `collexions.py` also collides with `ColleXions.py`.
+- **`requirements.txt` includes unused packages** — `Werkzeug`, `schedule`, and `psutil` are leftovers from the original script. `plexapi`, `requests`, and `pyyaml` are the ones actually imported.
+- **Config errors don't crash the daemon** — `config.py` raises `ConfigError` on any invalid or missing field; `main.py` catches it, logs the message, and retries in 5 minutes (`CONFIG_ERROR_RETRY_MINUTES`) instead of exiting. The pinned label is a fixed constant (`Pinned by ColleXions` in `main.py`), not a config key.
+- **Unpin scope is every promoted collection** — ADR-0002 makes the tool the sole manager of the home screen: any collection promoted by other means (e.g. manually in Plex) that isn't in the resolved set is unpinned each cycle. There is no exclusion list.
