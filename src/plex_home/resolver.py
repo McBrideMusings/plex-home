@@ -32,7 +32,21 @@ def resolve_slots(
     history: dict[tuple[str, str], datetime],
     now: datetime,
     rng: random.Random | None = None,
+    trace: list[dict] | None = None,
 ) -> list[ResolvedPin]:
+    """Resolve the configured home slots into an ordered list of pins.
+
+    When ``trace`` is provided, each decision is appended to it as a dict — used
+    by the simulator (``simulate.py``) to attribute pins to fixed vs pick slots
+    and to record the effective ``repeat_block_hours`` a pick was gated by:
+
+      - fixed pin:   ``{library, title, kind: "fixed"}``
+      - pick pin:    ``{library, title, kind: "pick", group, rbh}``
+      - empty pick:  ``{library, title: None, kind: "pick", groups}``
+
+    Passing ``trace`` does not change what is pinned; callers that don't need the
+    provenance simply omit it.
+    """
     if rng is None:
         rng = _default_rng
     used: set[ResolvedPin] = set()
@@ -46,9 +60,11 @@ def resolve_slots(
                     continue
                 resolved.append(pin)
                 used.add(pin)
+                if trace is not None:
+                    trace.append({"library": library, "title": pin.title, "kind": "fixed"})
 
             elif isinstance(slot, PickSlot):
-                picked = _resolve_pick(slot, library, config, all_collections, history, used, now, rng)
+                picked = _resolve_pick(slot, library, config, all_collections, history, used, now, rng, trace)
                 if picked is not None:
                     pin = ResolvedPin(library, picked)
                     resolved.append(pin)
@@ -66,6 +82,7 @@ def _resolve_pick(
     used: set[ResolvedPin],
     now: datetime,
     rng: random.Random,
+    trace: list[dict] | None = None,
 ) -> str | None:
     for group_name in slot.groups:
         group = config.groups[group_name]
@@ -84,7 +101,11 @@ def _resolve_pick(
 
         chosen = rng.choice(available)
         log.info("Slot pick: group %r → %r in %r", group_name, chosen.title, library)
+        if trace is not None:
+            trace.append({"library": library, "title": chosen.title, "kind": "pick", "group": group_name, "rbh": rbh})
         return chosen.title
 
     log.info("Pick slot with groups %r resolved to nothing — skipping", slot.groups)
+    if trace is not None:
+        trace.append({"library": library, "title": None, "kind": "pick", "groups": list(slot.groups)})
     return None

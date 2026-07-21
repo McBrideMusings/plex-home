@@ -7,12 +7,15 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from pathlib import Path
 
 from plexapi.server import PlexServer
 
 from . import hubs
+from . import simulate
 from .config import Config
 from .hubs import HubError
+from .plex_client import fetch_collections
 
 log = logging.getLogger("plex_home")
 
@@ -52,6 +55,15 @@ def build_parser() -> argparse.ArgumentParser:
     dest.add_argument("--to-top", action="store_true", help="Move to the top")
     dest.add_argument("--to-bottom", action="store_true", help="Move to the bottom")
     p_move.add_argument("--dry-run", action="store_true", help="Print the operation without calling Plex")
+
+    p_sim = sub.add_parser(
+        "simulate",
+        help="Dry-run the pinner forward in time and write a report (reads Plex, never writes)",
+    )
+    p_sim.add_argument("--days", type=float, default=7.0, help="Days to simulate (default: 7)")
+    p_sim.add_argument("--start", help="Sim start as YYYY-MM-DD or ISO 8601 (default: now UTC)")
+    p_sim.add_argument("--seed", type=int, default=0, help="RNG seed for reproducible picks (default: 0)")
+    p_sim.add_argument("--out", default="simulation_report.txt", help="Report file to write (default: simulation_report.txt)")
 
     return parser
 
@@ -160,4 +172,18 @@ def cmd_move(plex: PlexServer, config: Config, args) -> int:
     return 0
 
 
-HANDLERS = {"list": cmd_list, "pin": cmd_pin, "unpin": cmd_unpin, "move": cmd_move}
+def cmd_simulate(plex: PlexServer, config: Config, args) -> int:
+    all_collections = fetch_collections(plex, config.library_names)
+    try:
+        report = simulate.run_simulation(
+            config, all_collections, days=args.days, start=args.start, seed=args.seed
+        )
+    except ValueError as e:
+        raise HubError(str(e))
+    out = Path(args.out)
+    out.write_text(report, encoding="utf-8")
+    print(f"Wrote simulation report:\n{out.resolve()}")
+    return 0
+
+
+HANDLERS = {"list": cmd_list, "pin": cmd_pin, "unpin": cmd_unpin, "move": cmd_move, "simulate": cmd_simulate}

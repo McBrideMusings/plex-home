@@ -6,7 +6,7 @@ The code is a `plex_home` package under `src/`, with the test suite in `tests/`.
 
 ## Running
 
-The package exposes one console command, `plex-home`, with subcommands: `run` (the daemon) plus a live-control CLI (`list`, `pin`, `unpin`, `move`). A global `--config` flag (default `config.yaml`) supplies the Plex connection for every subcommand. Without installing, the equivalent is `python -m plex_home` (with `src/` on `PYTHONPATH`).
+The package exposes one console command, `plex-home`, with subcommands: `run` (the daemon), a live-control CLI (`list`, `pin`, `unpin`, `move`), and `simulate` (a dry run). A global `--config` flag (default `config.yaml`) supplies the Plex connection for every subcommand. Without installing, the equivalent is `python -m plex_home` (with `src/` on `PYTHONPATH`).
 
 ### Daemon
 ```
@@ -24,6 +24,13 @@ plex-home unpin <index|Title> --library NAME [--dry-run]
 plex-home move  <index|Title> --library NAME (--to K | --up [N] | --down [N] | --to-top | --to-bottom) [--dry-run]
 ```
 `--dry-run` prints the intended operation without calling Plex. Index targets are per-library, so `--library` is required for index-based `unpin`/`move`; title targets auto-resolve across configured libraries (error on collision). Plex drops a fresh `pin` at a Plex-determined position (observed mid-list), so use `--to K` for explicit placement.
+
+### `simulate` — dry-run the rotation forward in time
+`simulate` reads the live Plex collections (read-only) once, then walks the resolver forward over simulated cycles — advancing a clock by `cadence.interval_minutes`, threading the repeat-block history in memory, recording pins at simulated time — and writes a text report. It never calls the pin/unpin/order writers, so it cannot change the real home screen. Use it to preview the rotation and verify the interval/repeat-block behaviour before running the daemon.
+```
+plex-home simulate [--days N] [--start YYYY-MM-DD] [--seed N] [--out report.txt]
+```
+`--days` (default 7) sets the span (cycle count = `days*1440 / interval_minutes`). `--start` (default now, UTC) seeds the clock — set it inside a group's `date` window to exercise seasonal groups. `--seed` (default 0) fixes the RNG so pick slots are reproducible. The report has a TIMELINE (per-cycle pins in slot order, plus empty-pick notes), a PIN FREQUENCY table, and a REPEAT-BLOCK VERIFICATION section that PASS/FAILs each pick collection against its effective `repeat_block_hours` (fixed slots re-pin every cycle by design and are not checked).
 
 ### Docker
 The container installs the package and runs the daemon (`CMD ["plex-home", "run"]`). Mount the YAML config; read logs via `docker logs` (stdout, no file):
@@ -130,6 +137,7 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 | `src/plex_home/pinning.py` | Pin/unpin engine — fully manages the home screen (ADR-0002): pins resolved collections, unpins everything else, updates repeat-block history |
 | `src/plex_home/ordering.py` | Hub ordering — reorders home-screen managed hubs to match the resolved slot order via the Plex Move Hub API (`ManagedHub.move`) |
 | `src/plex_home/webhook.py` | Optional webhook notifier — POSTs a per-cycle summary (pinned titles + timestamp) when `webhook_url` is configured; never raises |
+| `src/plex_home/simulate.py` | Dry-run simulator (`simulate` subcommand) — advances a simulated clock over N days, re-runs the resolver each cycle against a read-only Plex snapshot, threads history in memory, and renders a text report (timeline + pin frequency + repeat-block PASS/FAIL). Never calls the writers |
 | `src/plex_home/main.py` | Entrypoint logic — builds the subcommand parser and dispatches: `run` → the daemon loop (reload config each cycle, fetch → resolve → pin → order → webhook, sleep, clean SIGINT shutdown, per-cycle error retry); `list`/`pin`/`unpin`/`move` → the CLI handlers. Exposed as the `plex-home` console script and `python -m plex_home` |
 | `src/plex_home/hubs.py` | Imperative managed-hub layer for the CLI (ADR-0005) — lists pinned hubs per library as an indexed order, and pins/unpins/moves them via `ManagedHub` (system + collection uniform); never touches the config |
 | `src/plex_home/cli.py` | CLI subcommand parsing, library resolution, relative-move math, and table/JSON output for `list`/`pin`/`unpin`/`move` |
@@ -146,6 +154,7 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 | `tests/test_main.py` | Pytest suite for the main loop + run_cycle wiring + subcommand dispatch (fully mocked) |
 | `tests/test_hubs.py` | Pytest suite for the managed-hub operations layer (fully mocked) |
 | `tests/test_cli.py` | Pytest suite for CLI parsing, handlers, and output (fully mocked) |
+| `tests/test_simulate.py` | Pytest suite for the dry-run simulator (determinism, cycle count, repeat-block verification, seasonal date windows) |
 | `pyproject.toml` | Package metadata, runtime deps, `plex-home` console script, and pytest config (`pythonpath = src`) |
 | `config.yaml` | Runtime YAML config (path overridable via the global `--config` flag) — user-provided, not committed with real credentials |
 | `requirements.txt` | Runtime deps for `pip install -r` (`plexapi`, `requests`, `pyyaml`); mirrors the `dependencies` in `pyproject.toml` |
