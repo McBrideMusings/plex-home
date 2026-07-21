@@ -150,12 +150,12 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 | `config.yaml` | Runtime YAML config (path overridable via the global `--config` flag) — user-provided, not committed with real credentials |
 | `requirements.txt` | Runtime deps for `pip install -r` (`plexapi`, `requests`, `pyyaml`); mirrors the `dependencies` in `pyproject.toml` |
 | `Dockerfile` | Container build (`python:3.12-slim-bullseye`) — `pip install .` then `CMD ["plex-home", "run"]` |
-| `pin_history.json` | Auto-generated at runtime by `history.py`; maps pinned collection title → last-pinned UTC timestamp for recency blocking. Delete to reset |
+| `pin_history.json` | Auto-generated at runtime by `history.py`; nested `{library: {title: last-pinned UTC timestamp}}` for recency blocking, keyed per-library so same-titled collections in different libraries block independently. Delete to reset |
 
 ## Gotchas
 
 - **Logging is stdout-only** — `main.py` calls `logging.basicConfig` with no file handler, so there is no log file to rotate or truncate. Under Docker, read logs via `docker logs`.
-- **`pin_history.json` is mutable state** — `history.py` rewrites it each cycle (collection title → last-pinned UTC timestamp). Delete it to reset the recency-block history; a missing or corrupt file is handled gracefully (starts fresh).
+- **`pin_history.json` is mutable state** — `history.py` rewrites it each cycle (nested `{library: {title: last-pinned UTC timestamp}}`, keyed per-library). Delete it to reset the recency-block history; a missing, corrupt, or legacy flat-format file is handled gracefully (starts fresh).
 - **Tests need `src/` on the path** — `pyproject.toml` sets `pythonpath = ["src"]`, so `.venv/bin/pytest` imports `plex_home` without an install. Running pytest a different way (or importing the modules directly) requires `pip install -e .` or `PYTHONPATH=src` first.
 - **Config errors don't crash the daemon** — `config.py` raises `ConfigError` on any invalid or missing field; `main.py` catches it, logs the message, and retries in 5 minutes (`CONFIG_ERROR_RETRY_MINUTES`) instead of exiting.
 - **Unpin scope is every promoted collection** — ADR-0002 makes the tool the sole manager of the home screen: any collection promoted by other means (e.g. manually in Plex) that isn't in the resolved set is unpinned each cycle. There is no exclusion list.

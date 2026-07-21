@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from plexapi.server import PlexServer
 from plexapi.exceptions import NotFound
 
+from .resolver import ResolvedPin
+
 log = logging.getLogger(__name__)
 
 
@@ -28,7 +30,7 @@ def _managed_hubs_by_title(section) -> dict[str, object]:
     return by_title
 
 
-def apply_order(plex: PlexServer, library_names: list[str], resolved: list[str]) -> OrderResult:
+def apply_order(plex: PlexServer, library_names: list[str], resolved: list[ResolvedPin]) -> OrderResult:
     """Reorder each library's home-screen managed hubs to match slot order (issue #9).
 
     The Plex Move Hub API is per-section: ``ManagedHub.move`` targets the hub's
@@ -60,7 +62,11 @@ def apply_order(plex: PlexServer, library_names: list[str], resolved: list[str])
             log.warning("Could not list managed hubs in %r: %s — skipping", name, e)
             continue
 
-        ordered = [(t, by_title[t]) for t in resolved if t in by_title]
+        ordered = [
+            (p.title, by_title[p.title])
+            for p in resolved
+            if p.library == name and p.title in by_title
+        ]
         if len(ordered) < 2:
             continue
 

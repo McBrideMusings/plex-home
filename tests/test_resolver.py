@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from plex_home.config import Config, Cadence, FixedSlot, PickSlot, Group
 from plex_home.plex_client import CollectionInfo
-from plex_home.resolver import resolve_slots
+from plex_home.resolver import resolve_slots, ResolvedPin
 
 
 def make_config(slots, groups=None, library="Movies") -> Config:
@@ -28,6 +28,10 @@ def coll(title: str, item_count: int = 20) -> CollectionInfo:
     return CollectionInfo(title=title, item_count=item_count)
 
 
+def titles(pins) -> list[str]:
+    return [p.title for p in pins]
+
+
 NOW = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
 EMPTY_HISTORY: dict = {}
 ALL_COLLS = {"Movies": [coll("Movie A"), coll("Movie B"), coll("Movie C")]}
@@ -36,15 +40,15 @@ ALL_COLLS = {"Movies": [coll("Movie A"), coll("Movie B"), coll("Movie C")]}
 def test_fixed_slot_always_resolves():
     cfg = make_config([FixedSlot("Recently Added")])
     result = resolve_slots(cfg, {}, EMPTY_HISTORY, NOW)
-    assert result == ["Recently Added"]
+    assert result == [ResolvedPin("Movies", "Recently Added")]
 
 
 def test_fixed_slot_skips_repeat_block():
     pinned_at = NOW - timedelta(hours=1)
-    history = {"Recently Added": pinned_at}
+    history = {("Movies", "Recently Added"): pinned_at}
     cfg = make_config([FixedSlot("Recently Added")])
     result = resolve_slots(cfg, {}, history, NOW)
-    assert result == ["Recently Added"]
+    assert titles(result) == ["Recently Added"]
 
 
 def test_pick_slot_resolves_from_eligible_group():
@@ -52,7 +56,8 @@ def test_pick_slot_resolves_from_eligible_group():
     cfg = make_config([PickSlot(["movies"])], {"movies": group})
     result = resolve_slots(cfg, ALL_COLLS, EMPTY_HISTORY, NOW)
     assert len(result) == 1
-    assert result[0] in {"Movie A", "Movie B", "Movie C"}
+    assert result[0].library == "Movies"
+    assert result[0].title in {"Movie A", "Movie B", "Movie C"}
 
 
 def test_pick_slot_skipped_when_no_groups_resolve():
@@ -64,9 +69,9 @@ def test_pick_slot_skipped_when_no_groups_resolve():
 
 def test_pick_slot_skipped_when_all_blocked():
     history = {
-        "Movie A": NOW - timedelta(hours=1),
-        "Movie B": NOW - timedelta(hours=1),
-        "Movie C": NOW - timedelta(hours=1),
+        ("Movies", "Movie A"): NOW - timedelta(hours=1),
+        ("Movies", "Movie B"): NOW - timedelta(hours=1),
+        ("Movies", "Movie C"): NOW - timedelta(hours=1),
     }
     group = make_group()
     cfg = make_config([PickSlot(["movies"])], {"movies": group})
@@ -83,7 +88,7 @@ def test_pick_slot_tries_groups_in_order():
     )
     result = resolve_slots(cfg, ALL_COLLS, EMPTY_HISTORY, NOW)
     assert len(result) == 1
-    assert result[0] in {"Movie A", "Movie B", "Movie C"}
+    assert result[0].title in {"Movie A", "Movie B", "Movie C"}
 
 
 def test_no_duplicate_across_slots():
@@ -94,7 +99,24 @@ def test_no_duplicate_across_slots():
         {"movies": group},
     )
     result = resolve_slots(cfg, colls, EMPTY_HISTORY, NOW)
-    assert result.count("Only Movie") == 1
+    assert titles(result).count("Only Movie") == 1
+
+
+def test_same_title_in_two_libraries_both_resolve():
+    # Movies and TV each have a collection titled "Featured" — they are distinct
+    # pins keyed by (library, title), so both resolve.
+    colls = {
+        "Movies": [coll("Featured")],
+        "TV Shows": [coll("Featured")],
+    }
+    cfg = make_config(
+        {
+            "Movies": [FixedSlot("Featured")],
+            "TV Shows": [FixedSlot("Featured")],
+        }
+    )
+    result = resolve_slots(cfg, colls, EMPTY_HISTORY, NOW)
+    assert result == [ResolvedPin("Movies", "Featured"), ResolvedPin("TV Shows", "Featured")]
 
 
 def test_fixed_slot_excluded_from_pick_pool():
@@ -105,7 +127,7 @@ def test_fixed_slot_excluded_from_pick_pool():
         {"movies": group},
     )
     result = resolve_slots(cfg, colls, EMPTY_HISTORY, NOW)
-    assert result == ["Only Movie"]
+    assert titles(result) == ["Only Movie"]
 
 
 def test_output_order_matches_slot_declaration():
@@ -116,16 +138,16 @@ def test_output_order_matches_slot_declaration():
         {"movies": group},
     )
     result = resolve_slots(cfg, colls, EMPTY_HISTORY, NOW)
-    assert result[0] == "Fixed First"
-    assert result[-1] == "Fixed Last"
+    assert result[0].title == "Fixed First"
+    assert result[-1].title == "Fixed Last"
     assert len(result) == 3
 
 
 def test_per_group_repeat_block_zero_bypasses():
     history = {
-        "Movie A": NOW - timedelta(hours=1),
-        "Movie B": NOW - timedelta(hours=1),
-        "Movie C": NOW - timedelta(hours=1),
+        ("Movies", "Movie A"): NOW - timedelta(hours=1),
+        ("Movies", "Movie B"): NOW - timedelta(hours=1),
+        ("Movies", "Movie C"): NOW - timedelta(hours=1),
     }
     group = make_group(repeat_block_hours=0)
     cfg = make_config([PickSlot(["movies"])], {"movies": group})
@@ -134,25 +156,37 @@ def test_per_group_repeat_block_zero_bypasses():
 
 
 def test_per_group_repeat_block_override():
-    history = {"Movie A": NOW - timedelta(hours=2)}
+    history = {("Movies", "Movie A"): NOW - timedelta(hours=2)}
     group = make_group(repeat_block_hours=1)
     cfg = make_config([PickSlot(["movies"])], {"movies": group})
     colls = {"Movies": [coll("Movie A")]}
     result = resolve_slots(cfg, colls, history, NOW)
-    assert result == ["Movie A"]
+    assert titles(result) == ["Movie A"]
+
+
+def test_repeat_block_is_per_library():
+    # "Movie A" blocked in Movies must NOT block a same-titled collection in TV.
+    history = {("Movies", "Solo"): NOW - timedelta(hours=1)}
+    cfg = make_config(
+        {"TV Shows": [PickSlot(["tv"])]},
+        {"tv": make_group("tv")},
+    )
+    colls = {"TV Shows": [coll("Solo")]}
+    result = resolve_slots(cfg, colls, history, NOW)
+    assert result == [ResolvedPin("TV Shows", "Solo")]
 
 
 def test_duplicate_fixed_slots_dedup():
     cfg = make_config([FixedSlot("Recently Added"), FixedSlot("Recently Added")])
     result = resolve_slots(cfg, {}, EMPTY_HISTORY, NOW)
-    assert result == ["Recently Added"]
+    assert titles(result) == ["Recently Added"]
 
 
 def test_injected_rng_makes_pick_deterministic():
     group = make_group()
     cfg = make_config([PickSlot(["movies"])], {"movies": group})
     picks = {
-        resolve_slots(cfg, ALL_COLLS, EMPTY_HISTORY, NOW, rng=random.Random(1))[0]
+        resolve_slots(cfg, ALL_COLLS, EMPTY_HISTORY, NOW, rng=random.Random(1))[0].title
         for _ in range(5)
     }
     assert len(picks) == 1
@@ -171,7 +205,12 @@ def test_home_grouped_by_library_in_mapping_order():
         {"mv": make_group("mv"), "tv": make_group("tv")},
     )
     result = resolve_slots(cfg, colls, EMPTY_HISTORY, NOW)
-    assert result == ["Movie Fixed", "Movie Pick", "Show Fixed", "Show Pick"]
+    assert result == [
+        ResolvedPin("Movies", "Movie Fixed"),
+        ResolvedPin("Movies", "Movie Pick"),
+        ResolvedPin("TV Shows", "Show Fixed"),
+        ResolvedPin("TV Shows", "Show Pick"),
+    ]
 
 
 def test_pick_draws_from_its_own_library():
@@ -184,7 +223,7 @@ def test_pick_draws_from_its_own_library():
         {"shared": make_group("shared")},
     )
     result = resolve_slots(cfg, colls, EMPTY_HISTORY, NOW)
-    assert result == ["Show Only"]
+    assert result == [ResolvedPin("TV Shows", "Show Only")]
 
 
 def test_multiple_fixed_and_pick_slots():
@@ -194,7 +233,7 @@ def test_multiple_fixed_and_pick_slots():
         {"movies": group},
     )
     result = resolve_slots(cfg, ALL_COLLS, EMPTY_HISTORY, NOW)
-    assert result[0] == "A"
-    assert result[1] == "B"
-    assert result[3] == "C"
-    assert result[2] in {"Movie A", "Movie B", "Movie C"}
+    assert result[0].title == "A"
+    assert result[1].title == "B"
+    assert result[3].title == "C"
+    assert result[2].title in {"Movie A", "Movie B", "Movie C"}

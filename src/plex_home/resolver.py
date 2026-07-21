@@ -1,6 +1,7 @@
 from __future__ import annotations
 import random
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 
 from .config import Config, FixedSlot, PickSlot
@@ -13,31 +14,45 @@ log = logging.getLogger(__name__)
 _default_rng = random.Random()
 
 
+@dataclass(frozen=True)
+class ResolvedPin:
+    """A collection to pin, identified by (library, title).
+
+    Collection titles are only unique within a library, so the library is part
+    of the identity everywhere a pin is keyed, compared, or blocked. Frozen so
+    it is hashable — used in the dedup set and as a dict key.
+    """
+    library: str
+    title: str
+
+
 def resolve_slots(
     config: Config,
     all_collections: dict[str, list[CollectionInfo]],
-    history: dict[str, datetime],
+    history: dict[tuple[str, str], datetime],
     now: datetime,
     rng: random.Random | None = None,
-) -> list[str]:
+) -> list[ResolvedPin]:
     if rng is None:
         rng = _default_rng
-    used: set[str] = set()
-    resolved: list[str] = []
+    used: set[ResolvedPin] = set()
+    resolved: list[ResolvedPin] = []
 
     for library, slots in config.home.items():
         for slot in slots:
             if isinstance(slot, FixedSlot):
-                if slot.collection in used:
+                pin = ResolvedPin(library, slot.collection)
+                if pin in used:
                     continue
-                resolved.append(slot.collection)
-                used.add(slot.collection)
+                resolved.append(pin)
+                used.add(pin)
 
             elif isinstance(slot, PickSlot):
                 picked = _resolve_pick(slot, library, config, all_collections, history, used, now, rng)
                 if picked is not None:
-                    resolved.append(picked)
-                    used.add(picked)
+                    pin = ResolvedPin(library, picked)
+                    resolved.append(pin)
+                    used.add(pin)
 
     return resolved
 
@@ -47,8 +62,8 @@ def _resolve_pick(
     library: str,
     config: Config,
     all_collections: dict[str, list[CollectionInfo]],
-    history: dict[str, datetime],
-    used: set[str],
+    history: dict[tuple[str, str], datetime],
+    used: set[ResolvedPin],
     now: datetime,
     rng: random.Random,
 ) -> str | None:
@@ -61,13 +76,14 @@ def _resolve_pick(
         rbh = group.repeat_block_hours if group.repeat_block_hours is not None else config.cadence.repeat_block_hours
         available = [
             c for c in colls
-            if c.title not in used and not is_blocked(c.title, history, rbh, now)
+            if ResolvedPin(library, c.title) not in used
+            and not is_blocked(library, c.title, history, rbh, now)
         ]
         if not available:
             continue
 
         chosen = rng.choice(available)
-        log.info("Slot pick: group %r → %r", group_name, chosen.title)
+        log.info("Slot pick: group %r → %r in %r", group_name, chosen.title, library)
         return chosen.title
 
     log.info("Pick slot with groups %r resolved to nothing — skipping", slot.groups)

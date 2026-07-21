@@ -3,6 +3,7 @@ import pytest
 
 from plex_home import main
 from plex_home.config import ConfigError
+from plex_home.resolver import ResolvedPin
 
 
 @pytest.fixture(autouse=True)
@@ -24,9 +25,9 @@ def make_config(webhook_url=None, interval=30):
 
 def patch_cycle_deps(resolved=None):
     """Patch every external call run_cycle makes; return the ExitStack-like dict of mocks."""
-    resolved = resolved if resolved is not None else ["A", "B"]
+    resolved = resolved if resolved is not None else [ResolvedPin("Movies", "A"), ResolvedPin("Movies", "B")]
     pin_result = MagicMock()
-    pin_result.history = {"A": "ts"}
+    pin_result.history = {("Movies", "A"): "ts"}
     patches = {
         "connect": patch("plex_home.main.connect", return_value=MagicMock()),
         "fetch": patch("plex_home.main.fetch_collections", return_value={"Movies": []}),
@@ -42,14 +43,15 @@ def patch_cycle_deps(resolved=None):
 
 
 def test_run_cycle_wires_pipeline_in_order():
-    patches, m, pin_result = patch_cycle_deps(resolved=["A", "B"])
+    resolved = [ResolvedPin("Movies", "A"), ResolvedPin("Movies", "B")]
+    patches, m, pin_result = patch_cycle_deps(resolved=resolved)
     try:
         config = make_config(webhook_url="http://hook")
         result = main.run_cycle(config)
     finally:
         for p in patches.values():
             p.stop()
-    assert result == ["A", "B"]
+    assert result == resolved
     m["resolve"].assert_called_once()
     m["apply_pins"].assert_called_once()
     # history saved from the pin engine's returned history
@@ -57,6 +59,7 @@ def test_run_cycle_wires_pipeline_in_order():
     m["apply_order"].assert_called_once()
     m["webhook"].assert_called_once()
     assert m["webhook"].call_args.args[0] == "http://hook"
+    # webhook receives plain titles, not the (library, title) pins
     assert m["webhook"].call_args.args[1] == ["A", "B"]
 
 

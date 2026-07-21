@@ -9,7 +9,7 @@ from .config import load_config, ConfigError, Config
 from .plex_client import connect, fetch_collections
 from .hubs import HubError
 from .history import load_history, save_history
-from .resolver import resolve_slots
+from .resolver import resolve_slots, ResolvedPin
 from .pinning import apply_pins
 from .ordering import apply_order
 from .webhook import send_webhook
@@ -23,8 +23,8 @@ CONFIG_ERROR_RETRY_MINUTES = 5
 _running = True
 
 
-def run_cycle(config: Config) -> list[str]:
-    """Run one full pin cycle and return the resolved (pinned) collection titles.
+def run_cycle(config: Config) -> list[ResolvedPin]:
+    """Run one full pin cycle and return the resolved pins (library + title).
 
     Connects to Plex, fetches collections, resolves the configured slots, applies
     the pin/unpin engine, enforces hub ordering, and fires the webhook if one is
@@ -36,7 +36,11 @@ def run_cycle(config: Config) -> list[str]:
     now = datetime.now(tz=timezone.utc)
 
     resolved = resolve_slots(config, all_collections, history, now)
-    log.info("Resolved %d collection(s): %s", len(resolved), ", ".join(resolved) or "(none)")
+    log.info(
+        "Resolved %d collection(s): %s",
+        len(resolved),
+        ", ".join(f"{p.title} ({p.library})" for p in resolved) or "(none)",
+    )
 
     pin_result = apply_pins(plex, config.library_names, resolved, history)
     save_history(pin_result.history)
@@ -44,7 +48,7 @@ def run_cycle(config: Config) -> list[str]:
     apply_order(plex, config.library_names, resolved)
 
     if config.webhook_url:
-        send_webhook(config.webhook_url, resolved, now)
+        send_webhook(config.webhook_url, [p.title for p in resolved], now)
 
     return resolved
 

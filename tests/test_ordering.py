@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, call
 from plexapi.exceptions import NotFound
 
 from plex_home import ordering
+from plex_home.resolver import ResolvedPin
 
 
 def make_hub(title: str) -> MagicMock:
@@ -28,10 +29,18 @@ def make_plex(sections: dict[str, MagicMock]) -> MagicMock:
     return plex
 
 
+def mv(*t) -> list[ResolvedPin]:
+    return [ResolvedPin("Movies", x) for x in t]
+
+
+def pins(*pairs) -> list[ResolvedPin]:
+    return [ResolvedPin(lib, title) for lib, title in pairs]
+
+
 def test_hubs_moved_into_resolved_order():
     a, b, c = make_hub("A"), make_hub("B"), make_hub("C")
     plex = make_plex({"Movies": make_section([a, b, c])})
-    result = ordering.apply_order(plex, ["Movies"], ["A", "B", "C"])
+    result = ordering.apply_order(plex, ["Movies"], mv("A", "B", "C"))
     a.move.assert_called_once_with(after=None)
     b.move.assert_called_once_with(after=a)
     c.move.assert_called_once_with(after=b)
@@ -42,7 +51,7 @@ def test_hubs_moved_into_resolved_order():
 def test_order_follows_resolved_not_hub_listing_order():
     a, b, c = make_hub("A"), make_hub("B"), make_hub("C")
     plex = make_plex({"Movies": make_section([c, a, b])})  # Plex returns them shuffled
-    result = ordering.apply_order(plex, ["Movies"], ["A", "B", "C"])
+    result = ordering.apply_order(plex, ["Movies"], mv("A", "B", "C"))
     a.move.assert_called_once_with(after=None)
     b.move.assert_called_once_with(after=a)
     c.move.assert_called_once_with(after=b)
@@ -56,12 +65,32 @@ def test_anchor_resets_per_library():
         "Movies": make_section([a, b]),
         "TV Shows": make_section([c, d]),
     })
-    result = ordering.apply_order(plex, ["Movies", "TV Shows"], ["A", "B", "C", "D"])
+    result = ordering.apply_order(
+        plex, ["Movies", "TV Shows"],
+        pins(("Movies", "A"), ("Movies", "B"), ("TV Shows", "C"), ("TV Shows", "D")),
+    )
     a.move.assert_called_once_with(after=None)
     b.move.assert_called_once_with(after=a)
     c.move.assert_called_once_with(after=None)   # first TV hub → top of its own section, NOT after B
     d.move.assert_called_once_with(after=c)
     assert result.moved == ["A", "B", "C", "D"]
+
+
+def test_same_title_in_other_library_not_reordered():
+    # "Featured" resolved only for Movies; TV also has a "Featured" hub that is
+    # NOT resolved for TV — it must not be touched by the Movies ordering.
+    m_feat, m_other = make_hub("Featured"), make_hub("MovieB")
+    tv_feat = make_hub("Featured")
+    plex = make_plex({
+        "Movies": make_section([m_feat, m_other]),
+        "TV Shows": make_section([tv_feat]),
+    })
+    ordering.apply_order(
+        plex, ["Movies", "TV Shows"],
+        pins(("Movies", "Featured"), ("Movies", "MovieB")),
+    )
+    m_feat.move.assert_called_once_with(after=None)
+    tv_feat.move.assert_not_called()   # TV's Featured is not resolved for TV
 
 
 def test_single_resolved_hub_per_library_no_move():
@@ -71,7 +100,7 @@ def test_single_resolved_hub_per_library_no_move():
         "Movies": make_section([a]),
         "TV Shows": make_section([c]),
     })
-    result = ordering.apply_order(plex, ["Movies", "TV Shows"], ["A", "C"])
+    result = ordering.apply_order(plex, ["Movies", "TV Shows"], pins(("Movies", "A"), ("TV Shows", "C")))
     a.move.assert_not_called()   # one resolved hub in each library → nothing to order within either
     c.move.assert_not_called()
     assert result.moved == []
@@ -80,7 +109,7 @@ def test_single_resolved_hub_per_library_no_move():
 def test_single_hub_no_move_needed():
     a = make_hub("A")
     plex = make_plex({"Movies": make_section([a])})
-    result = ordering.apply_order(plex, ["Movies"], ["A"])
+    result = ordering.apply_order(plex, ["Movies"], mv("A"))
     a.move.assert_not_called()
     assert result.moved == []
 
@@ -89,7 +118,7 @@ def test_move_error_does_not_abort_and_anchor_holds():
     a, b, c = make_hub("A"), make_hub("B"), make_hub("C")
     b.move.side_effect = RuntimeError("plex 500")
     plex = make_plex({"Movies": make_section([a, b, c])})
-    result = ordering.apply_order(plex, ["Movies"], ["A", "B", "C"])
+    result = ordering.apply_order(plex, ["Movies"], mv("A", "B", "C"))
     assert result.moved == ["A", "C"]
     assert result.failed == ["B"]
     # B failed → anchor stays A, so C is moved after A (the last known-good position)
@@ -100,14 +129,14 @@ def test_system_hubs_not_reordered():
     a, b = make_hub("A"), make_hub("B")
     recently_added = make_hub("Recently Added")
     plex = make_plex({"Movies": make_section([a, b, recently_added])})
-    ordering.apply_order(plex, ["Movies"], ["A", "B"])
+    ordering.apply_order(plex, ["Movies"], mv("A", "B"))
     recently_added.move.assert_not_called()
 
 
 def test_resolved_title_without_hub_skipped():
     a, b = make_hub("A"), make_hub("B")
     plex = make_plex({"Movies": make_section([a, b])})
-    result = ordering.apply_order(plex, ["Movies"], ["A", "Ghost", "B"])
+    result = ordering.apply_order(plex, ["Movies"], mv("A", "Ghost", "B"))
     a.move.assert_called_once_with(after=None)
     b.move.assert_called_once_with(after=a)  # Ghost skipped, B anchors after A
     assert result.moved == ["A", "B"]
@@ -118,7 +147,7 @@ def test_resolved_title_without_hub_skipped():
 def test_missing_library_skipped_not_crashed():
     a, b = make_hub("A"), make_hub("B")
     plex = make_plex({"Movies": make_section([a, b])})
-    result = ordering.apply_order(plex, ["Movies", "Nonexistent"], ["A", "B"])
+    result = ordering.apply_order(plex, ["Movies", "Nonexistent"], mv("A", "B"))
     assert result.moved == ["A", "B"]
 
 
@@ -133,7 +162,7 @@ def test_empty_resolved_no_moves():
 
 def test_no_managed_hubs_skipped():
     plex = make_plex({"Movies": make_section([])})
-    result = ordering.apply_order(plex, ["Movies"], ["A", "B"])
+    result = ordering.apply_order(plex, ["Movies"], mv("A", "B"))
     assert result.moved == []
 
 
@@ -141,6 +170,6 @@ def test_managed_hubs_fetch_error_skips_library():
     section = MagicMock()
     section.managedHubs.side_effect = RuntimeError("boom")
     plex = make_plex({"Movies": section})
-    result = ordering.apply_order(plex, ["Movies"], ["A", "B"])
+    result = ordering.apply_order(plex, ["Movies"], mv("A", "B"))
     assert result.moved == []
     assert result.failed == []
