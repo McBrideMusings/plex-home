@@ -7,6 +7,13 @@ import yaml
 _DATE_RE = re.compile(r"^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])/(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$")
 
+_GROUP_KEYS = frozenset({
+    "date", "time",
+    "include_labels", "include_collections",
+    "exclude_labels", "exclude_collections",
+    "repeat_block_hours", "min_items_for_pinning",
+})
+
 
 class ConfigError(Exception):
     pass
@@ -140,6 +147,13 @@ def _parse_groups(raw: object) -> dict[str, Group]:
     for name, graw in raw.items():
         if not isinstance(graw, dict):
             raise ConfigError(f"Group '{name}' must be a mapping")
+
+        unknown = set(graw) - _GROUP_KEYS
+        if unknown:
+            raise ConfigError(
+                f"Group '{name}' has unknown key(s): {', '.join(sorted(unknown))} — "
+                f"allowed keys are: {', '.join(sorted(_GROUP_KEYS))}"
+            )
 
         date = graw.get("date")
         if date is not None:

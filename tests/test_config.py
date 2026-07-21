@@ -109,6 +109,27 @@ def test_empty_home_library_slot_list_raises():
         os.unlink(path)
 
 
+def test_unknown_group_key_raises():
+    data = merge(BASE, {"groups": {"movies": {"typo_key": True}}})
+    path = write_yaml(data)
+    try:
+        with pytest.raises(ConfigError, match="unknown key"):
+            load_config(path)
+    finally:
+        os.unlink(path)
+
+
+def test_stray_library_key_on_group_raises():
+    # library was removed from groups (ADR-0006) — a leftover must not be a silent no-op
+    data = merge(BASE, {"groups": {"movies": {"library": "Movies"}}})
+    path = write_yaml(data)
+    try:
+        with pytest.raises(ConfigError, match="unknown key"):
+            load_config(path)
+    finally:
+        os.unlink(path)
+
+
 def test_missing_required_field_raises():
     for field in ["plex_url", "plex_token", "library_names", "cadence", "home", "groups"]:
         data = {k: v for k, v in BASE.items() if k != field}
