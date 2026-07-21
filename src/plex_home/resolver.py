@@ -25,24 +25,26 @@ def resolve_slots(
     used: set[str] = set()
     resolved: list[str] = []
 
-    for slot in config.home:
-        if isinstance(slot, FixedSlot):
-            if slot.collection in used:
-                continue
-            resolved.append(slot.collection)
-            used.add(slot.collection)
+    for library, slots in config.home.items():
+        for slot in slots:
+            if isinstance(slot, FixedSlot):
+                if slot.collection in used:
+                    continue
+                resolved.append(slot.collection)
+                used.add(slot.collection)
 
-        elif isinstance(slot, PickSlot):
-            picked = _resolve_pick(slot, config, all_collections, history, used, now, rng)
-            if picked is not None:
-                resolved.append(picked)
-                used.add(picked)
+            elif isinstance(slot, PickSlot):
+                picked = _resolve_pick(slot, library, config, all_collections, history, used, now, rng)
+                if picked is not None:
+                    resolved.append(picked)
+                    used.add(picked)
 
     return resolved
 
 
 def _resolve_pick(
     slot: PickSlot,
+    library: str,
     config: Config,
     all_collections: dict[str, list[CollectionInfo]],
     history: dict[str, datetime],
@@ -52,7 +54,7 @@ def _resolve_pick(
 ) -> str | None:
     for group_name in slot.groups:
         group = config.groups[group_name]
-        colls = eligible_collections(group, all_collections, config.cadence.min_items_for_pinning, now)
+        colls = eligible_collections(group, library, all_collections, config.cadence.min_items_for_pinning, now)
         if colls is None:
             continue
 

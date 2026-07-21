@@ -28,7 +28,6 @@ Slot = Union[FixedSlot, PickSlot]
 @dataclass
 class Group:
     name: str
-    library: str
     date: Optional[str] = None
     time: Optional[str] = None
     include_labels: list[str] = field(default_factory=list)
@@ -52,7 +51,7 @@ class Config:
     plex_token: str
     library_names: list[str]
     cadence: Cadence
-    home: list[Slot]
+    home: dict[str, list[Slot]]
     groups: dict[str, Group]
     webhook_url: Optional[str] = None
 
@@ -78,7 +77,7 @@ def load_config(path: str) -> Config:
 
     cadence = _parse_cadence(raw["cadence"])
     groups = _parse_groups(raw["groups"])
-    home = _parse_home(raw["home"], groups)
+    home = _parse_home(raw["home"], groups, library_names)
 
     return Config(
         plex_url=plex_url,
@@ -141,11 +140,6 @@ def _parse_groups(raw: object) -> dict[str, Group]:
     for name, graw in raw.items():
         if not isinstance(graw, dict):
             raise ConfigError(f"Group '{name}' must be a mapping")
-        if "library" not in graw:
-            raise ConfigError(f"Group '{name}' is missing required field 'library'")
-        library = graw["library"]
-        if not isinstance(library, str) or not library.strip():
-            raise ConfigError(f"Group '{name}.library' must be a non-empty string")
 
         date = graw.get("date")
         if date is not None:
@@ -173,7 +167,6 @@ def _parse_groups(raw: object) -> dict[str, Group]:
 
         groups[name] = Group(
             name=name,
-            library=library,
             date=date,
             time=time_,
             include_labels=_str_list_field(graw, name, "include_labels"),
@@ -196,33 +189,53 @@ def _str_list_field(graw: dict, group_name: str, key: str) -> list[str]:
     return val
 
 
-def _parse_home(raw: object, groups: dict[str, Group]) -> list[Slot]:
-    if not isinstance(raw, list) or not raw:
-        raise ConfigError("'home' must be a non-empty list of slots")
+def _parse_home(
+    raw: object, groups: dict[str, Group], library_names: list[str]
+) -> dict[str, list[Slot]]:
+    if not isinstance(raw, dict) or not raw:
+        raise ConfigError(
+            "'home' must be a non-empty mapping of library name → list of slots"
+        )
 
+    home: dict[str, list[Slot]] = {}
+    for library, raw_slots in raw.items():
+        if library not in library_names:
+            raise ConfigError(
+                f"home library '{library}' is not in library_names "
+                f"({', '.join(library_names)})"
+            )
+        if not isinstance(raw_slots, list) or not raw_slots:
+            raise ConfigError(f"home['{library}'] must be a non-empty list of slots")
+        home[library] = _parse_slots(raw_slots, groups, library)
+
+    return home
+
+
+def _parse_slots(raw: list, groups: dict[str, Group], library: str) -> list[Slot]:
     slots: list[Slot] = []
     for i, item in enumerate(raw):
+        loc = f"home['{library}'][{i}]"
         if not isinstance(item, dict):
-            raise ConfigError(f"home[{i}] must be a mapping")
+            raise ConfigError(f"{loc} must be a mapping")
         if "collection" in item:
             name = item["collection"]
             if not isinstance(name, str) or not name.strip():
-                raise ConfigError(f"home[{i}].collection must be a non-empty string")
+                raise ConfigError(f"{loc}.collection must be a non-empty string")
             slots.append(FixedSlot(collection=name))
         elif "pick" in item:
             pick_list = item["pick"]
             if not isinstance(pick_list, list) or not pick_list:
-                raise ConfigError(f"home[{i}].pick must be a non-empty list of group names")
+                raise ConfigError(f"{loc}.pick must be a non-empty list of group names")
             for j, gname in enumerate(pick_list):
                 if not isinstance(gname, str):
-                    raise ConfigError(f"home[{i}].pick[{j}] must be a string (group name)")
+                    raise ConfigError(f"{loc}.pick[{j}] must be a string (group name)")
                 if gname not in groups:
                     raise ConfigError(
-                        f"home[{i}].pick[{j}] references unknown group '{gname}' — "
+                        f"{loc}.pick[{j}] references unknown group '{gname}' — "
                         f"defined groups are: {', '.join(sorted(groups))}"
                     )
             slots.append(PickSlot(groups=pick_list))
         else:
-            raise ConfigError(f"home[{i}] must have either 'collection' or 'pick' key")
+            raise ConfigError(f"{loc} must have either 'collection' or 'pick' key")
 
     return slots

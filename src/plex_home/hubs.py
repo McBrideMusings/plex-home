@@ -54,9 +54,10 @@ def config_collection_titles(config: Config) -> set[str]:
     collections the config explicitly references, used only to tag list output.
     """
     titles: set[str] = set()
-    for slot in config.home:
-        if isinstance(slot, FixedSlot):
-            titles.add(slot.collection)
+    for slots in config.home.values():
+        for slot in slots:
+            if isinstance(slot, FixedSlot):
+                titles.add(slot.collection)
     for group in config.groups.values():
         titles.update(group.include_collections)
     return titles

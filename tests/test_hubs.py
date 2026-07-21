@@ -48,7 +48,7 @@ def make_config(home=None, groups=None, libraries=("Movies",)) -> Config:
         plex_url="http://p", plex_token="t",
         library_names=list(libraries),
         cadence=Cadence(interval_minutes=30),
-        home=home or [],
+        home=home or {},
         groups=groups or {},
     )
 
@@ -61,7 +61,7 @@ def test_list_pinned_indexes_and_tags_kind():
         collection_hub("Unpinned", 3, pinned=False),  # excluded
     ]
     plex = make_plex({"Movies": make_section(managed)})
-    config = make_config(home=[FixedSlot(collection="Halloween")])
+    config = make_config(home={"Movies": [FixedSlot(collection="Halloween")]})
     out = hubs.list_pinned(plex, ["Movies"], config)["Movies"]
     assert [(v.index, v.title, v.kind, v.config_managed) for v in out] == [
         (0, "Recently Added Movies", "system", False),

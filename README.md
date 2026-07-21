@@ -61,16 +61,20 @@ webhook_url: https://discord.com/api/webhooks/...   # optional
 
 groups:
   halloween:
-    library: Movies
     date: 10-01/10-31
     include_labels: [Horror]
   staff-picks:
-    library: Movies
     include_collections: [A24, Studio Ghibli]
+  prestige-drama:
+    include_labels: [Prestige]
 
 home:
-  - collection: Trending Movies       # fixed slot — always this collection
-  - pick: [halloween, staff-picks]    # first eligible group wins
+  Movies:
+    - collection: Trending Movies       # fixed slot — always this collection
+    - pick: [halloween, staff-picks]    # first eligible group wins
+  TV Shows:
+    - collection: Trending TV
+    - pick: [prestige-drama]
 ```
 
 | Key | Purpose |
@@ -78,9 +82,11 @@ home:
 | `plex_url`, `plex_token` | Plex server URL and auth token (required) |
 | `library_names` | Libraries to manage (required) |
 | `cadence` | `interval_minutes` (required), `repeat_block_hours` (default 24), `min_items_for_pinning` (default 10) |
-| `groups` | Named collection groups a `pick` slot draws from — each with a `library` and optional `date`/`time`/`include_labels`/`include_collections`/`exclude_labels`/`exclude_collections` and per-group cadence overrides |
-| `home` | Ordered list of slots — each a `{collection: "<title>"}` or `{pick: [<group>, ...]}` |
+| `groups` | Named collection groups a `pick` slot draws from — each with optional `date`/`time`/`include_labels`/`include_collections`/`exclude_labels`/`exclude_collections` and per-group cadence overrides. A group carries **no** library; its library is the `home` section that references it (so the same group may be reused under more than one library). |
+| `home` | Mapping of **library name → ordered list of slots**; each slot is `{collection: "<title>"}` or `{pick: [<group>, ...]}`. Every key must be one of `library_names`. |
 | `webhook_url` | Optional; POSTs a per-cycle summary of pinned titles |
+
+**Home order is per-library, not global.** Plex renders promoted collections grouped by library, and exposes no way to reorder the library blocks themselves (that's your account's pinned-source order, set by hand in Plex). So the list under each `home` library sets the order *within that library's block only*; you cannot lift a TV collection above a Movies one. See [ADR-0006](docs/adr/0006-per-library-home-mapping.md).
 
 > Never share your Plex token. Keep real credentials out of committed files.
 

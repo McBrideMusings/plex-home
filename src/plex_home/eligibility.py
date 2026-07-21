@@ -38,13 +38,14 @@ def filter_collections(
 
 def eligible_collections(
     group: Group,
+    library: str,
     all_collections: dict[str, list[CollectionInfo]],
     global_min_items: int,
     now: datetime,
 ) -> list[CollectionInfo] | None:
     if not is_group_eligible(group, now):
         return None
-    library_colls = all_collections.get(group.library, [])
+    library_colls = all_collections.get(library, [])
     return filter_collections(group, library_colls, global_min_items)
 
 

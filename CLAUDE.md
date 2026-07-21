@@ -47,7 +47,7 @@ All runtime behaviour is controlled by a YAML config (default path `config.yaml`
 | `library_names` | list of strings (required) | Libraries to manage (e.g. `[Movies, TV Shows]`) |
 | `cadence` | mapping (required) | Timing and global defaults — see below |
 | `groups` | mapping (required) | Named collection groups that `pick` slots draw from — see below |
-| `home` | list of slots (required) | Ordered home-screen slots — see below |
+| `home` | mapping (required) | Library name → ordered home-screen slots — see below |
 | `webhook_url` | string (optional) | POSTed a per-cycle summary of pinned titles; omit to disable |
 
 ### `cadence`
@@ -60,11 +60,10 @@ All runtime behaviour is controlled by a YAML config (default path `config.yaml`
 
 ### `groups`
 
-A mapping of group name → group definition. Each group scopes a set of a library's collections and, optionally, when the group is eligible. A `pick` slot resolves to the first eligible group in its list.
+A mapping of group name → group definition. Each group scopes a set of collections and, optionally, when the group is eligible. A `pick` slot resolves to the first eligible group in its list. A group carries **no** `library` field — the library it filters against is the `home` section that references it, so one group may be reused under more than one library (ADR-0006).
 
 | Key | Type | Purpose |
 |-----|------|---------|
-| `library` | string (required) | Which library the group's collections live in |
 | `date` | `MM-DD/MM-DD` (optional) | Date window the group is eligible; cross-year ranges (e.g. `12-26/01-03`) supported |
 | `time` | `HH:MM-HH:MM` (optional) | Time-of-day window the group is eligible |
 | `include_labels` | list (optional) | Restrict to collections carrying any of these Plex labels |
@@ -76,12 +75,14 @@ A mapping of group name → group definition. Each group scopes a set of a libra
 
 ### `home` slots
 
-An ordered list; the order is the home-screen order the pinned hubs are moved into. Each entry is exactly one of:
+A mapping of **library name → ordered list of slots**. Every key must be one of `library_names`, or the config fails to load. Within a library, the list order is the home-screen order its pinned hubs are moved into. Each slot is exactly one of:
 
 - **Fixed slot** — `{collection: "<title>"}` — always pins that exact collection.
-- **Pick slot** — `{pick: [<group>, ...]}` — walks the groups in order and stops at the first one that has an eligible, non-repeat-blocked, not-already-used collection, then pins one of that group's collections chosen at random. Every group name referenced must be defined under `groups`, or the config fails to load.
+- **Pick slot** — `{pick: [<group>, ...]}` — walks the groups in order and stops at the first one that has an eligible, non-repeat-blocked, not-already-used collection, then pins one of that group's collections (filtered against *this* section's library) chosen at random. Every group name referenced must be defined under `groups`, or the config fails to load.
 
-Collections are de-duplicated across slots, so the same collection never occupies two slots.
+Collections are de-duplicated across all slots and libraries, so the same collection never occupies two slots.
+
+**Order is per-library, not global.** Plex groups promoted collections by library and exposes no cross-library home order (that's the account's pinned-source order, set manually in Plex). The tool orders *within* each library block only — you cannot place a TV collection above a Movies one. The resolver emits one flat list grouped by library (mapping order), which the per-section ordering layer honors within each block (ADR-0006).
 
 ### Example
 
@@ -99,16 +100,20 @@ webhook_url: https://discord.com/api/webhooks/...   # optional
 
 groups:
   halloween:
-    library: Movies
     date: 10-01/10-31
     include_labels: [Horror]
   staff-picks:
-    library: Movies
     include_collections: [A24, Studio Ghibli]
+  prestige-drama:
+    include_labels: [Prestige]
 
 home:
-  - collection: Trending Movies       # fixed slot — always this collection
-  - pick: [halloween, staff-picks]    # first eligible group wins
+  Movies:
+    - collection: Trending Movies       # fixed slot — always this collection
+    - pick: [halloween, staff-picks]    # first eligible group wins
+  TV Shows:
+    - collection: Trending TV
+    - pick: [prestige-drama]
 ```
 
 ## Key files

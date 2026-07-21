@@ -49,6 +49,34 @@ def test_order_follows_resolved_not_hub_listing_order():
     assert result.moved == ["A", "B", "C"]
 
 
+def test_anchor_resets_per_library():
+    a, b = make_hub("A"), make_hub("B")       # Movies block
+    c, d = make_hub("C"), make_hub("D")       # TV block
+    plex = make_plex({
+        "Movies": make_section([a, b]),
+        "TV Shows": make_section([c, d]),
+    })
+    result = ordering.apply_order(plex, ["Movies", "TV Shows"], ["A", "B", "C", "D"])
+    a.move.assert_called_once_with(after=None)
+    b.move.assert_called_once_with(after=a)
+    c.move.assert_called_once_with(after=None)   # first TV hub → top of its own section, NOT after B
+    d.move.assert_called_once_with(after=c)
+    assert result.moved == ["A", "B", "C", "D"]
+
+
+def test_single_resolved_hub_per_library_no_move():
+    a = make_hub("A")
+    c = make_hub("C")
+    plex = make_plex({
+        "Movies": make_section([a]),
+        "TV Shows": make_section([c]),
+    })
+    result = ordering.apply_order(plex, ["Movies", "TV Shows"], ["A", "C"])
+    a.move.assert_not_called()   # one resolved hub in each library → nothing to order within either
+    c.move.assert_not_called()
+    assert result.moved == []
+
+
 def test_single_hub_no_move_needed():
     a = make_hub("A")
     plex = make_plex({"Movies": make_section([a])})
@@ -85,16 +113,6 @@ def test_resolved_title_without_hub_skipped():
     assert result.moved == ["A", "B"]
     assert "Ghost" not in result.moved
     assert "Ghost" not in result.failed
-
-
-def test_multiple_libraries_single_ordered_list():
-    m = make_hub("MovieHub")
-    t = make_hub("TVHub")
-    plex = make_plex({"Movies": make_section([m]), "TV Shows": make_section([t])})
-    result = ordering.apply_order(plex, ["Movies", "TV Shows"], ["MovieHub", "TVHub"])
-    m.move.assert_called_once_with(after=None)
-    t.move.assert_called_once_with(after=m)
-    assert result.moved == ["MovieHub", "TVHub"]
 
 
 def test_missing_library_skipped_not_crashed():

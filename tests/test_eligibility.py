@@ -10,7 +10,7 @@ def dt(month, day, hour=12, minute=0):
 
 
 def group(**kwargs) -> Group:
-    defaults = dict(name="test", library="Movies")
+    defaults = dict(name="test")
     defaults.update(kwargs)
     return Group(**defaults)
 
@@ -141,13 +141,13 @@ def test_min_items_group_override():
 
 def test_eligible_returns_none_when_ineligible():
     g = group(date="10-01/10-31")
-    result = e.eligible_collections(g, ALL, global_min_items=0, now=dt(11, 1))
+    result = e.eligible_collections(g, "Movies", ALL, global_min_items=0, now=dt(11, 1))
     assert result is None
 
 
 def test_eligible_returns_empty_list_when_no_matches():
     g = group(include_labels=["nonexistent"])
-    result = e.eligible_collections(g, ALL, global_min_items=0, now=dt(6, 1))
+    result = e.eligible_collections(g, "Movies", ALL, global_min_items=0, now=dt(6, 1))
     assert result == []
 
 
@@ -156,7 +156,7 @@ def test_eligible_uses_correct_library():
         "Movies": [coll("Movie A", 20)],
         "TV Shows": [coll("Show A", 20)],
     }
-    g = group(library="TV Shows")
-    result = e.eligible_collections(g, libs, global_min_items=0, now=dt(6, 1))
+    g = group()
+    result = e.eligible_collections(g, "TV Shows", libs, global_min_items=0, now=dt(6, 1))
     assert len(result) == 1
     assert result[0].title == "Show A"

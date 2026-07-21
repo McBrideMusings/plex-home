@@ -8,19 +8,20 @@ from plex_home.plex_client import CollectionInfo
 from plex_home.resolver import resolve_slots
 
 
-def make_config(slots, groups=None) -> Config:
+def make_config(slots, groups=None, library="Movies") -> Config:
+    home = slots if isinstance(slots, dict) else {library: slots}
     return Config(
         plex_url="http://localhost:32400",
         plex_token="TOKEN",
-        library_names=["Movies"],
+        library_names=["Movies", "TV Shows"],
         cadence=Cadence(interval_minutes=60, repeat_block_hours=24.0, min_items_for_pinning=0),
-        home=slots,
+        home=home,
         groups=groups or {},
     )
 
 
-def make_group(name="movies", library="Movies", **kwargs) -> Group:
-    return Group(name=name, library=library, **kwargs)
+def make_group(name="movies", **kwargs) -> Group:
+    return Group(name=name, **kwargs)
 
 
 def coll(title: str, item_count: int = 20) -> CollectionInfo:
@@ -155,6 +156,35 @@ def test_injected_rng_makes_pick_deterministic():
         for _ in range(5)
     }
     assert len(picks) == 1
+
+
+def test_home_grouped_by_library_in_mapping_order():
+    colls = {
+        "Movies": [coll("Movie Pick")],
+        "TV Shows": [coll("Show Pick")],
+    }
+    cfg = make_config(
+        {
+            "Movies": [FixedSlot("Movie Fixed"), PickSlot(["mv"])],
+            "TV Shows": [FixedSlot("Show Fixed"), PickSlot(["tv"])],
+        },
+        {"mv": make_group("mv"), "tv": make_group("tv")},
+    )
+    result = resolve_slots(cfg, colls, EMPTY_HISTORY, NOW)
+    assert result == ["Movie Fixed", "Movie Pick", "Show Fixed", "Show Pick"]
+
+
+def test_pick_draws_from_its_own_library():
+    colls = {
+        "Movies": [coll("Movie Only")],
+        "TV Shows": [coll("Show Only")],
+    }
+    cfg = make_config(
+        {"TV Shows": [PickSlot(["shared"])]},
+        {"shared": make_group("shared")},
+    )
+    result = resolve_slots(cfg, colls, EMPTY_HISTORY, NOW)
+    assert result == ["Show Only"]
 
 
 def test_multiple_fixed_and_pick_slots():
