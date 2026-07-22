@@ -17,6 +17,7 @@ Declarative Plex home-screen manager. Defines an ordered list of slots; each slo
 - **Repeat block** — A recency window (`repeat_block_hours`) that prevents the same collection from being picked again within N hours. Bypassable per group with `repeat_block_hours: 0`.
 - **Seasonal group** — A group with a `date:` constraint that makes it eligible only during a specific annual date range (e.g. Oct 1–31 for Halloween content). Previously called "special collections" in the original codebase — avoid that term.
 - **Config-managed hub / Manual hub** — A pinned collection whose title is in the daemon's resolved config set is *config-managed*; one pinned but absent from the config (e.g. via the CLI or the Plex UI) is *manual*. The CLI's `list` computes this by comparing live hubs against the resolved config, not from any Plex label. A running daemon cycle reconciles the home screen back to the config, so manual pins are ephemeral against it.
+- **Cross-library collection** — Two collections sharing a title across different libraries (e.g. a `Star Trek` collection in both Movies and TV Shows). Plex does **not** merge them: each pins as its own hub, keyed per library. There is no cross-library hub, so "one themed row spanning libraries" is not achievable by naming alone (verified — see below).
 
 ### Architecture
 
@@ -31,4 +32,25 @@ Declarative Plex home-screen manager. Defines an ordered list of slots; each slo
 ## Flagged ambiguities
 
 - **"Special collections"** (original codebase term) — means date-range-gated priority collections. Replaced by the **seasonal group** pattern in this codebase. Do not use "special collections."
-- **Cross-library collections** — whether same-named collections across libraries can appear as a single merged hub is unverified. Tracked in spike issue.
+- ~~**Cross-library collections**~~ — resolved 2026-07-22, see "Verified Plex behaviour" below.
+
+## Verified Plex behaviour
+
+### Same-named collections across libraries do not merge (issue #1, verified 2026-07-22)
+
+Tested live against the server by pinning the pre-existing `Star Trek` collection in **both** Movies (section 1) and TV Shows (section 2), then reading `/hubs/promoted`. Both collections were unpinned again afterwards, restoring the baseline.
+
+**Result — two separate hubs, not one merged hub.** `/hubs/promoted` returned two entries, both titled `Star Trek`:
+
+| Library | `hubIdentifier` | `key` |
+|---------|-----------------|-------|
+| Movies (section 1) | `custom.collection.1.47605.47605` | `/library/collections/47605/children` |
+| TV Shows (section 2) | `custom.collection.2.146315.146315` | `/library/collections/146315/children` |
+
+Hub identity embeds the **library section key** and the collection's **ratingKey**, so a collection hub is per-library by construction — a shared title is coincidental and carries no grouping meaning. `section.managedHubs()` agrees, exposing `custom.collection.<sectionKey>.<ratingKey>` per library.
+
+**Consequences for this tool:**
+
+- Cross-library themed grouping is **not** achievable by naming collections identically. It needs a different mechanism — a playlist, or accepting two separate hubs.
+- Even pinning both, they cannot be made adjacent on the home screen: hub order is per-library (ADR-0006), so the two rows land in different library blocks and no cross-library ordering exists.
+- Three titles already occur in more than one library on this server (`Star Trek`, `IMDb Popular`, `Streaming Collections`). Each is an independent hub, and each is blocked independently by repeat-block history, which is keyed `(library, title)` — consistent with this finding.
