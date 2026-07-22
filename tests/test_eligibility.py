@@ -139,6 +139,35 @@ def test_min_items_group_override():
     assert len(result) == 2
 
 
+def test_matches_membership_by_label():
+    g = group(include_labels=["horror"])
+    assert e.matches_group_membership(g, coll("Spooky", 30, ["horror"]))
+    assert not e.matches_group_membership(g, coll("Comedy", 30, ["funny"]))
+
+
+def test_matches_membership_by_name():
+    g = group(include_collections=["A24"])
+    assert e.matches_group_membership(g, coll("A24", 30))
+    assert not e.matches_group_membership(g, coll("Ghibli", 30))
+
+
+def test_matches_membership_ignores_min_items():
+    g = group(include_labels=["horror"], min_items_for_pinning=100)
+    # below any threshold, yet still a structural member (min-items is orthogonal)
+    assert e.matches_group_membership(g, coll("Thin", 1, ["horror"]))
+
+
+def test_matches_membership_no_include_matches_all_but_excludes():
+    g = group(exclude_labels=["adult"])
+    assert e.matches_group_membership(g, coll("Clean", 30))
+    assert not e.matches_group_membership(g, coll("Naughty", 30, ["adult"]))
+
+
+def test_matches_membership_exclude_overrides_include():
+    g = group(include_labels=["horror"], exclude_collections=["Banned"])
+    assert not e.matches_group_membership(g, coll("Banned", 30, ["horror"]))
+
+
 def test_eligible_returns_none_when_ineligible():
     g = group(date="10-01/10-31")
     result = e.eligible_collections(g, "Movies", ALL, global_min_items=0, now=dt(11, 1))

@@ -5,7 +5,7 @@ from plexapi.exceptions import NotFound
 from plex_home import hubs
 from plex_home import managed_hubs
 from plex_home.hubs import HubError
-from plex_home.config import Config, Cadence, FixedSlot
+from plex_home.config import Config, Cadence, FixedSlot, PickSlot, Group
 
 
 def make_hub(title: str, identifier: str, pinned: bool = True) -> MagicMock:
@@ -44,6 +44,16 @@ def make_plex(sections: dict) -> MagicMock:
     return plex
 
 
+def real_collection(title: str, child_count: int = 20, labels: list[str] | None = None) -> MagicMock:
+    """A section.collections() row, with labels shaped as objects carrying .tag
+    (matching what plex_client.fetch_collections reads)."""
+    c = MagicMock()
+    c.title = title
+    c.childCount = child_count
+    c.labels = [MagicMock(tag=t) for t in (labels or [])]
+    return c
+
+
 def make_config(home=None, groups=None, libraries=("Movies",)) -> Config:
     return Config(
         plex_url="http://p", plex_token="t",
@@ -69,6 +79,48 @@ def test_list_pinned_indexes_and_tags_kind():
         (1, "Halloween", "collection", True),   # in a fixed slot → config-managed
         (2, "Random", "collection", False),     # pinned but not in config → manual
     ]
+
+
+def test_list_pinned_tags_label_group_membership():
+    # 'Spooky' is pinned and carries the 'horror' label; a pick slot references a
+    # group that includes that label → config-managed, even though it is not named.
+    managed = [collection_hub("Spooky", 1), collection_hub("Random", 2)]
+    colls = [real_collection("Spooky", 30, ["horror"]), real_collection("Random", 30, ["comedy"])]
+    plex = make_plex({"Movies": make_section(managed, colls)})
+    config = make_config(
+        home={"Movies": [PickSlot(groups=["halloween"])]},
+        groups={"halloween": Group(name="halloween", include_labels=["horror"])},
+    )
+    out = hubs.list_pinned(plex, ["Movies"], config)["Movies"]
+    tags = {(v.title, v.config_managed) for v in out}
+    assert tags == {("Spooky", True), ("Random", False)}
+
+
+def test_list_pinned_label_membership_ignores_min_items_and_block():
+    # Reachable by label but far below the group's min_items — still config-managed
+    # (static reachability ignores the min-items and repeat-block gates).
+    managed = [collection_hub("Thin", 1)]
+    colls = [real_collection("Thin", 1, ["horror"])]
+    plex = make_plex({"Movies": make_section(managed, colls)})
+    config = make_config(
+        home={"Movies": [PickSlot(groups=["halloween"])]},
+        groups={"halloween": Group(name="halloween", include_labels=["horror"], min_items_for_pinning=100)},
+    )
+    out = hubs.list_pinned(plex, ["Movies"], config)["Movies"]
+    assert out[0].config_managed is True
+
+
+def test_list_pinned_ignores_group_not_referenced_by_a_pick_slot():
+    # 'orphan' group would match, but no pick slot references it → not reachable.
+    managed = [collection_hub("Spooky", 1)]
+    colls = [real_collection("Spooky", 30, ["horror"])]
+    plex = make_plex({"Movies": make_section(managed, colls)})
+    config = make_config(
+        home={"Movies": [FixedSlot(collection="Other")]},
+        groups={"orphan": Group(name="orphan", include_labels=["horror"])},
+    )
+    out = hubs.list_pinned(plex, ["Movies"], config)["Movies"]
+    assert out[0].config_managed is False
 
 
 def test_list_available_excludes_pinned():

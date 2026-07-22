@@ -14,8 +14,10 @@ from dataclasses import dataclass
 from plexapi.server import PlexServer
 from plexapi.exceptions import NotFound
 
-from .config import Config, FixedSlot
+from .config import Config, FixedSlot, PickSlot
 from .managed_hubs import is_collection, on_home, realize_order
+from .eligibility import matches_group_membership
+from .plex_client import CollectionInfo, fetch_collections
 
 log = logging.getLogger(__name__)
 
@@ -37,20 +39,34 @@ def _kind(hub: object) -> str:
     return "collection" if is_collection(hub) else "system"
 
 
-def config_collection_titles(config: Config) -> set[str]:
-    """Collection titles the config can pin, by explicit name.
+def config_managed_titles(config: Config, library: str, collections: list[CollectionInfo]) -> set[str]:
+    """Collection titles the config can pin in ``library`` (static reachability).
 
-    Fixed-slot collections plus every group's ``include_collections``. Label-based
-    group membership is dynamic and not included — this is a best-effort marker of
-    collections the config explicitly references, used only to tag list output.
+    A title is config-managed if this library's ``home`` section either names it in
+    a fixed slot, or references (via a ``pick`` slot) a group whose structural
+    membership it satisfies — ``include_labels``/``include_collections`` minus
+    ``exclude_*``, resolved against the live ``collections`` and their labels
+    (:func:`eligibility.matches_group_membership`).
+
+    This answers "could the config pin this hub", not "would this cycle keep it":
+    date/time windows, the min-items threshold, repeat-block recency, and per-cycle
+    random pick choice are all ignored, so the tag is stable across cycles. Groups
+    defined but not referenced by any pick slot in this section cannot be pinned
+    here and are excluded (ADR-0006 — a group's library is the section that uses
+    it). See issue #16.
     """
     titles: set[str] = set()
-    for slots in config.home.values():
-        for slot in slots:
-            if isinstance(slot, FixedSlot):
-                titles.add(slot.collection)
-    for group in config.groups.values():
-        titles.update(group.include_collections)
+    referenced_groups: set[str] = set()
+    for slot in config.home.get(library, []):
+        if isinstance(slot, FixedSlot):
+            titles.add(slot.collection)
+        elif isinstance(slot, PickSlot):
+            referenced_groups.update(slot.groups)
+    for gname in referenced_groups:
+        group = config.groups[gname]
+        for coll in collections:
+            if matches_group_membership(group, coll):
+                titles.add(coll.title)
     return titles
 
 
@@ -110,11 +126,16 @@ def _verify_placement(section, title: str, requested: int) -> int | None:
 
 
 def list_pinned(plex: PlexServer, library_names: list[str], config: Config) -> dict[str, list[HubView]]:
-    """Per-library ordered, indexed list of pinned hubs (system + collection)."""
-    managed_titles = config_collection_titles(config)
+    """Per-library ordered, indexed list of pinned hubs (system + collection).
+
+    Fetches each library's live collections once (for their labels) so the
+    ``config_managed`` tag accounts for label-group membership, not just names.
+    """
     out: dict[str, list[HubView]] = {}
     for name in library_names:
         section = _section(plex, name)
+        collections = fetch_collections(plex, [name]).get(name, [])
+        managed_titles = config_managed_titles(config, name, collections)
         views: list[HubView] = []
         for i, hub in enumerate(_pinned_hubs(section)):
             kind = _kind(hub)

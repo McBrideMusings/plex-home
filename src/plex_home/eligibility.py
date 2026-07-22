@@ -12,25 +12,40 @@ def is_group_eligible(group: Group, now: datetime) -> bool:
     return True
 
 
+def matches_group_membership(group: Group, coll: CollectionInfo) -> bool:
+    """Structural include/exclude membership: does ``coll`` belong to ``group``?
+
+    Applies only the group's ``include_labels``/``include_collections`` (union)
+    minus ``exclude_labels``/``exclude_collections``. Ignores the date/time
+    windows, the min-items threshold, and any repeat-block/dedup state — this is
+    the static "the config could pin this" test, separate from the resolver's
+    full eligibility. ``filter_collections`` layers min-items on top of it; the
+    ``list`` CLI uses it directly to tag config-managed hubs (issue #16).
+    """
+    has_include = bool(group.include_labels or group.include_collections)
+    if has_include:
+        label_match = any(lbl in coll.labels for lbl in group.include_labels)
+        name_match = coll.title in group.include_collections
+        if not (label_match or name_match):
+            return False
+    if any(lbl in coll.labels for lbl in group.exclude_labels):
+        return False
+    if coll.title in group.exclude_collections:
+        return False
+    return True
+
+
 def filter_collections(
     group: Group,
     collections: list[CollectionInfo],
     global_min_items: int,
 ) -> list[CollectionInfo]:
     min_items = group.min_items_for_pinning if group.min_items_for_pinning is not None else global_min_items
-    has_include = bool(group.include_labels or group.include_collections)
     result = []
     for coll in collections:
         if coll.item_count < min_items:
             continue
-        if has_include:
-            label_match = any(lbl in coll.labels for lbl in group.include_labels)
-            name_match = coll.title in group.include_collections
-            if not (label_match or name_match):
-                continue
-        label_excluded = any(lbl in coll.labels for lbl in group.exclude_labels)
-        name_excluded = coll.title in group.exclude_collections
-        if label_excluded or name_excluded:
+        if not matches_group_membership(group, coll):
             continue
         result.append(coll)
     return result
