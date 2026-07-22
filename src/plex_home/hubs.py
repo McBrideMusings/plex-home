@@ -17,7 +17,7 @@ from plexapi.exceptions import NotFound
 from .config import Config, FixedSlot, PickSlot
 from .managed_hubs import is_collection, on_home, realize_order
 from .eligibility import matches_group_membership
-from .plex_client import CollectionInfo, fetch_collections
+from .plex_client import CollectionInfo, collection_infos
 
 log = logging.getLogger(__name__)
 
@@ -134,8 +134,7 @@ def list_pinned(plex: PlexServer, library_names: list[str], config: Config) -> d
     out: dict[str, list[HubView]] = {}
     for name in library_names:
         section = _section(plex, name)
-        collections = fetch_collections(plex, [name]).get(name, [])
-        managed_titles = config_managed_titles(config, name, collections)
+        managed_titles = config_managed_titles(config, name, collection_infos(section, name))
         views: list[HubView] = []
         for i, hub in enumerate(_pinned_hubs(section)):
             kind = _kind(hub)
@@ -149,6 +148,17 @@ def list_pinned(plex: PlexServer, library_names: list[str], config: Config) -> d
             ))
         out[name] = views
     return out
+
+
+def pinned_titles(plex: PlexServer, library: str) -> set[str]:
+    """Titles of hubs currently pinned in ``library`` (system + collection).
+
+    A lightweight lookup for library resolution: no live-collection fetch and no
+    config-membership tagging, unlike :func:`list_pinned`. Callers that only need
+    to know *which* library holds a pinned title use this to avoid that cost.
+    """
+    section = _section(plex, library)
+    return {getattr(h, "title", "") for h in _pinned_hubs(section)}
 
 
 def list_available(plex: PlexServer, library_names: list[str]) -> dict[str, list[str]]:

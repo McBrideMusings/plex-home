@@ -123,6 +123,16 @@ def test_list_pinned_ignores_group_not_referenced_by_a_pick_slot():
     assert out[0].config_managed is False
 
 
+def test_pinned_titles_returns_system_and_collection_titles():
+    managed = [
+        system_hub("Recently Added Movies", "movie.recentlyadded"),
+        collection_hub("Halloween", 1),
+        collection_hub("Unpinned", 2, pinned=False),  # excluded
+    ]
+    plex = make_plex({"Movies": make_section(managed)})
+    assert hubs.pinned_titles(plex, "Movies") == {"Recently Added Movies", "Halloween"}
+
+
 def test_list_available_excludes_pinned():
     managed = [collection_hub("Pinned", 1)]
     colls = [MagicMock(title=t) for t in ("Pinned", "Zeta", "Alpha")]

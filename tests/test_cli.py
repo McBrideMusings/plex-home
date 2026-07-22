@@ -120,21 +120,18 @@ def test_index_target_without_library_raises():
 
 
 def test_resolve_target_library_finds_by_title():
-    def pinned(plex, libs, config):
-        name = libs[0]
-        title = "Halloween" if name == "Movies" else "Other"
-        return {name: [HubView(name, 0, title, "collection", False)]}
+    def pinned(plex, name):
+        return {"Halloween"} if name == "Movies" else {"Other"}
 
-    with patch("plex_home.cli.hubs.list_pinned", side_effect=pinned):
+    with patch("plex_home.cli.hubs.pinned_titles", side_effect=pinned):
         lib = cli._resolve_target_library(MagicMock(), make_cfg(("Movies", "TV Shows")), "Halloween", None)
     assert lib == "Movies"
 
 
 def test_resolve_target_library_ambiguous_raises():
-    def pinned(plex, libs, config):
-        name = libs[0]
-        return {name: [HubView(name, 0, "Dup", "collection", False)]}
+    def pinned(plex, name):
+        return {"Dup"}
 
-    with patch("plex_home.cli.hubs.list_pinned", side_effect=pinned):
+    with patch("plex_home.cli.hubs.pinned_titles", side_effect=pinned):
         with pytest.raises(HubError):
             cli._resolve_target_library(MagicMock(), make_cfg(("Movies", "TV Shows")), "Dup", None)

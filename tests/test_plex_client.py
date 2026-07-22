@@ -95,6 +95,12 @@ def test_connect_returns_server_on_success():
     assert result is mock_server
 
 
+def test_collection_infos_reads_a_section_directly():
+    section = make_section([make_collection("Spooky", 12, ["horror"])])
+    infos = pc.collection_infos(section, "Movies")
+    assert [(i.title, i.item_count, i.labels) for i in infos] == [("Spooky", 12, ["horror"])]
+
+
 def test_none_labels_handled():
     coll = make_collection("No Labels", 10, [])
     coll.labels = None

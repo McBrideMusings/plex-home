@@ -27,6 +27,26 @@ def connect(plex_url: str, plex_token: str) -> PlexServer:
         raise ConnectionError(f"Plex connection error ({type(e).__name__}): {e}")
 
 
+def collection_infos(section, library: str) -> list[CollectionInfo]:
+    """Read one library ``section``'s collections into ``CollectionInfo`` objects.
+
+    Callers that already hold a section (the ``list`` CLI) use this directly to
+    avoid a second library lookup; ``fetch_collections`` wraps it per library.
+    """
+    infos: list[CollectionInfo] = []
+    for coll in section.collections():
+        try:
+            labels = [label.tag for label in (coll.labels or [])]
+            infos.append(CollectionInfo(
+                title=coll.title,
+                item_count=coll.childCount,
+                labels=labels,
+            ))
+        except Exception as e:
+            log.warning("Skipping collection in %r due to error: %s", library, e)
+    return infos
+
+
 def fetch_collections(plex: PlexServer, library_names: list[str]) -> dict[str, list[CollectionInfo]]:
     result: dict[str, list[CollectionInfo]] = {}
     for name in library_names:
@@ -39,17 +59,7 @@ def fetch_collections(plex: PlexServer, library_names: list[str]) -> dict[str, l
             log.warning("Could not fetch library %r: %s — skipping", name, e)
             continue
 
-        infos: list[CollectionInfo] = []
-        for coll in section.collections():
-            try:
-                labels = [label.tag for label in (coll.labels or [])]
-                infos.append(CollectionInfo(
-                    title=coll.title,
-                    item_count=coll.childCount,
-                    labels=labels,
-                ))
-            except Exception as e:
-                log.warning("Skipping collection in %r due to error: %s", name, e)
+        infos = collection_infos(section, name)
         result[name] = infos
         log.info("Fetched %d collections from library %r", len(infos), name)
     return result

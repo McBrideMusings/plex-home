@@ -82,8 +82,7 @@ def _resolve_pin_library(plex: PlexServer, config: Config, title: str, library: 
     hits = []
     for name in candidates:
         avail = hubs.list_available(plex, [name])[name]
-        pinned = {v.title for v in hubs.list_pinned(plex, [name], config)[name]}
-        if title in avail or title in pinned:
+        if title in avail or title in hubs.pinned_titles(plex, name):
             hits.append(name)
     if not hits:
         raise HubError(f"No collection titled {title!r} in {candidates}")
@@ -100,7 +99,7 @@ def _resolve_target_library(plex: PlexServer, config: Config, target: str, libra
     if target.isdigit():
         return candidates[0]
     hits = [name for name in candidates
-            if any(v.title == target for v in hubs.list_pinned(plex, [name], config)[name])]
+            if target in hubs.pinned_titles(plex, name)]
     if not hits:
         raise HubError(f"No pinned hub titled {target!r} in {candidates}")
     if len(hits) > 1:
