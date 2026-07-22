@@ -81,7 +81,7 @@ home:
 |-----|---------|
 | `plex_url`, `plex_token` | Plex server URL and auth token (required) |
 | `library_names` | Libraries to manage (required) |
-| `cadence` | `interval_minutes` (required), `repeat_block_hours` (default 24), `min_items_for_pinning` (default 10) |
+| `cadence` | `interval_minutes` (required), `repeat_block_hours` (default 24), `min_items_for_pinning` (default 10), `mirror_recommended` (default false — when true, resolved pins are also force-promoted to Library Recommended) |
 | `groups` | Named collection groups a `pick` slot draws from — each with optional `date`/`time`/`include_labels`/`include_collections`/`exclude_labels`/`exclude_collections` and per-group cadence overrides. A group carries **no** library; its library is the `home` section that references it (so the same group may be reused under more than one library). |
 | `home` | Mapping of **library name → ordered list of slots**; each slot is `{collection: "<title>"}` (any managed hub by title — collection or system) or `{pick: [<group>, ...]}` (collections only). Every key must be one of `library_names`. |
 | `webhook_url` | Optional; POSTs a per-cycle summary of pinned titles |

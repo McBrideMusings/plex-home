@@ -57,13 +57,16 @@ def apply_pins(
     library_names: list[str],
     resolved: list[ResolvedPin],
     history: dict[tuple[str, str], datetime],
+    mirror_recommended: bool = False,
 ) -> PinResult:
     """Fully manage the home screen and the Managed Recommendations list (ADR-0007).
 
     The config is the complete truth for everything promoted anywhere. Per
     library, over ``section.managedHubs()`` (system + collection rows uniformly):
 
-    1. Resolved pins → promote to home + friends' home (Recommended left as-is).
+    1. Resolved pins → promote to home + friends' home. Library Recommended is
+       left as-is by default; with ``mirror_recommended`` the resolved pins are
+       also force-promoted to Recommended, so the Recommended tab mirrors Home.
        A resolved collection absent from the managed list (previously removed or
        never promoted) is re-created via its collection visibility.
     2. Non-resolved **collection** → ``remove()`` from the Managed Recommendations
@@ -94,7 +97,10 @@ def apply_pins(
                 continue
             try:
                 already = on_home(target)
-                target.updateVisibility(home=True, shared=True)
+                vis = {"home": True, "shared": True}
+                if mirror_recommended:
+                    vis["recommended"] = True
+                target.updateVisibility(**vis)
                 (result.unchanged if already else result.pinned).append(pin)
                 kept.add(id(target))
                 log.info("%s %r in %r", "Kept pinned" if already else "Pinned", pin.title, name)

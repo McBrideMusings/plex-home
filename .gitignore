@@ -12,6 +12,9 @@ build/
 venv/
 *.log
 
+# macOS
+.DS_Store
+
 # Environment / secrets
 .env
 config.local.json

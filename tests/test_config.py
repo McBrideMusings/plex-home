@@ -41,6 +41,7 @@ def test_valid_config_loads():
         assert cfg.cadence.interval_minutes == 60
         assert cfg.cadence.repeat_block_hours == 24.0
         assert cfg.cadence.min_items_for_pinning == 10
+        assert cfg.cadence.mirror_recommended is False
         assert list(cfg.home) == ["Movies"]
         assert isinstance(cfg.home["Movies"][0], FixedSlot)
         assert cfg.home["Movies"][0].collection == "Recently Added"
@@ -206,6 +207,25 @@ def test_negative_min_items_raises():
     path = write_yaml(data)
     try:
         with pytest.raises(ConfigError, match="min_items_for_pinning"):
+            load_config(path)
+    finally:
+        os.unlink(path)
+
+
+def test_mirror_recommended_parsed_true():
+    data = merge(BASE, {"cadence": {"interval_minutes": 60, "mirror_recommended": True}})
+    path = write_yaml(data)
+    try:
+        assert load_config(path).cadence.mirror_recommended is True
+    finally:
+        os.unlink(path)
+
+
+def test_mirror_recommended_non_bool_raises():
+    data = merge(BASE, {"cadence": {"interval_minutes": 60, "mirror_recommended": "yes"}})
+    path = write_yaml(data)
+    try:
+        with pytest.raises(ConfigError, match="mirror_recommended"):
             load_config(path)
     finally:
         os.unlink(path)

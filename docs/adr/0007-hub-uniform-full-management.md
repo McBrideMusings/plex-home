@@ -14,4 +14,8 @@ Ordering uses move-to-top in reverse target order (`managed_hubs.realize_order`)
 
 The kind-agnostic primitives shared by the daemon engines (`pinning.py`, `ordering.py`) and the imperative CLI (`hubs.py`) live in `managed_hubs.py` so none of the three owns the others' internals.
 
+Everything is keyed by `(library, title)`, so **two collections sharing an identical title in one library are not distinguishable** — `title_map` keeps one and the sweep un-manages the other. This is inherent to title-based addressing (the resolver, history, and CLI all key by title) and is accepted, not worked around; give collections distinct titles within a library. A collection and a *system* hub of the same title are fine — the collision rule resolves that in the collection's favor.
+
+By default a resolved pin's Library Recommended flag is left as-is (clean-extras-only). Set `cadence.mirror_recommended: true` to also force-promote resolved pins to Recommended, so the Recommended tab mirrors Home exactly.
+
 **Consequence:** the config defines everything promoted anywhere. A collection pinned to Friends' Home or Recommended only — but absent from the config — is removed on the next cycle. If something should appear anywhere on a managed library's home or recommendations, it belongs in the config. Global `/hubs/home` rows (Continue Watching, On Deck) are not section-managed and are never touched.

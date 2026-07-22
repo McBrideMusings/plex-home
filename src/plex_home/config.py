@@ -50,6 +50,7 @@ class Cadence:
     interval_minutes: int
     repeat_block_hours: float = 24.0
     min_items_for_pinning: int = 10
+    mirror_recommended: bool = False
 
 
 @dataclass
@@ -137,7 +138,16 @@ def _parse_cadence(raw: object) -> Cadence:
     if not isinstance(mip, int) or mip < 0:
         raise ConfigError("'cadence.min_items_for_pinning' must be a non-negative integer")
 
-    return Cadence(interval_minutes=interval, repeat_block_hours=float(rbh), min_items_for_pinning=mip)
+    mirror = raw.get("mirror_recommended", False)
+    if not isinstance(mirror, bool):
+        raise ConfigError("'cadence.mirror_recommended' must be a boolean")
+
+    return Cadence(
+        interval_minutes=interval,
+        repeat_block_hours=float(rbh),
+        min_items_for_pinning=mip,
+        mirror_recommended=mirror,
+    )
 
 
 def _parse_groups(raw: object) -> dict[str, Group]:

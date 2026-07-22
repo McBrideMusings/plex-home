@@ -64,6 +64,7 @@ All runtime behaviour is controlled by a YAML config (default path `config.yaml`
 | `interval_minutes` | — (required, > 0) | Minutes between cycles |
 | `repeat_block_hours` | `24` | Hours a pinned collection is blocked from being re-pinned |
 | `min_items_for_pinning` | `10` | Collections with fewer items are skipped |
+| `mirror_recommended` | `false` | When `true`, resolved pins are also force-promoted to Library Recommended so the Recommended tab mirrors Home; default leaves each pin's Recommended flag as-is |
 
 ### `groups`
 
@@ -169,4 +170,5 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 - **`pin_history.json` is mutable state** — `history.py` rewrites it each cycle (nested `{library: {title: last-pinned UTC timestamp}}`, keyed per-library). Delete it to reset the recency-block history; a missing, corrupt, or legacy flat-format file is handled gracefully (starts fresh).
 - **Tests need `src/` on the path** — `pyproject.toml` sets `pythonpath = ["src"]`, so `.venv/bin/pytest` imports `plex_home` without an install. Running pytest a different way (or importing the modules directly) requires `pip install -e .` or `PYTHONPATH=src` first.
 - **Config errors don't crash the daemon** — `config.py` raises `ConfigError` on any invalid or missing field; `main.py` catches it, logs the message, and retries in 5 minutes (`CONFIG_ERROR_RETRY_MINUTES`) instead of exiting.
+- **Same-titled collections in one library collide** — everything keys by `(library, title)`, so two collections with an identical title in the same library are indistinguishable: `managed_hubs.title_map` keeps one and the sweep un-manages the other (ADR-0007). Give collections distinct titles within a library. A collection and a *system* hub sharing a title is fine — the collection wins.
 - **The config owns all three visibility axes** — ADR-0007 extends ADR-0002 from home-only to Home + Friends' Home + Library Recommended, across system *and* collection hubs. Each cycle any hub the config doesn't pin is swept: a **collection** is `remove()`d from the Managed Recommendations list entirely (the `×` in Plex — `DELETE …/manage/{id}`; it deletes the *recommendation record*, never the collection or its items), and a **system hub** (not removable) is demoted on all three axes. This is what keeps the Recommended list from accreting every collection ever pinned. A collection you pin to Friends'-Home-only or Recommended-only in the Plex UI is removed on the next cycle unless it's in the config. Global `/hubs/home` rows (Continue Watching, On Deck) are not section-managed and are never touched.

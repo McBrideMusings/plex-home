@@ -89,6 +89,20 @@ def test_resolved_collection_promoted():
     assert result.removed == []
 
 
+def test_mirror_recommended_force_promotes_recommended():
+    hub = make_hub("Halloween", own=False)
+    plex = make_plex({"Movies": make_section([hub])})
+    pinning.apply_pins(plex, ["Movies"], pins(("Movies", "Halloween")), {}, mirror_recommended=True)
+    hub.updateVisibility.assert_called_once_with(home=True, shared=True, recommended=True)
+
+
+def test_default_leaves_recommended_untouched():
+    hub = make_hub("Halloween", own=False)
+    plex = make_plex({"Movies": make_section([hub])})
+    pinning.apply_pins(plex, ["Movies"], pins(("Movies", "Halloween")), {})
+    hub.updateVisibility.assert_called_once_with(home=True, shared=True)   # no recommended kwarg
+
+
 def test_resolved_system_hub_promoted():
     hub = system_hub("Recently Added Movies", "movie.recentlyadded", own=False)
     plex = make_plex({"Movies": make_section([hub])})

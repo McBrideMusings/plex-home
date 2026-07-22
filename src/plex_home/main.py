@@ -42,7 +42,10 @@ def run_cycle(config: Config) -> list[ResolvedPin]:
         ", ".join(f"{p.title} ({p.library})" for p in resolved) or "(none)",
     )
 
-    pin_result = apply_pins(plex, config.library_names, resolved, history)
+    pin_result = apply_pins(
+        plex, config.library_names, resolved, history,
+        mirror_recommended=config.cadence.mirror_recommended,
+    )
     save_history(pin_result.history)
 
     apply_order(plex, config.library_names, resolved)
