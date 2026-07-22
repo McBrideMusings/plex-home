@@ -3,6 +3,7 @@ import pytest
 from plexapi.exceptions import NotFound
 
 from plex_home import hubs
+from plex_home import managed_hubs
 from plex_home.hubs import HubError
 from plex_home.config import Config, Cadence, FixedSlot
 
@@ -180,17 +181,17 @@ def test_target_order_clamps_high_index_to_bottom():
     assert hubs._target_order(pinned, 0, 9) == ["B", "C", "A"]
 
 
-# --- _realize_order (reverse move-to-top builds any order) ---
+# --- realize_order (reverse move-to-top builds any order) ---
 
 def test_realize_order_builds_target_via_move_to_top():
     section, live = make_reorderable_section(["A", "B", "C", "D"])
-    hubs._realize_order(section, ["C", "A", "D", "B"], dry_run=False)
+    managed_hubs.realize_order(section, ["C", "A", "D", "B"], dry_run=False)
     assert [h.title for h in live] == ["C", "A", "D", "B"]
 
 
 def test_realize_order_dry_run_moves_nothing():
     section, live = make_reorderable_section(["A", "B", "C"])
-    hubs._realize_order(section, ["C", "B", "A"], dry_run=True)
+    managed_hubs.realize_order(section, ["C", "B", "A"], dry_run=True)
     assert [h.title for h in live] == ["A", "B", "C"]
 
 

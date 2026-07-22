@@ -84,10 +84,10 @@ A mapping of group name → group definition. Each group scopes a set of collect
 
 A mapping of **library name → ordered list of slots**. Every key must be one of `library_names`, or the config fails to load. Within a library, the list order is the home-screen order its pinned hubs are moved into. Each slot is exactly one of:
 
-- **Fixed slot** — `{collection: "<title>"}` — always pins that exact collection.
-- **Pick slot** — `{pick: [<group>, ...]}` — walks the groups in order and stops at the first one that has an eligible, non-repeat-blocked, not-already-used collection, then pins one of that group's collections (filtered against *this* section's library) chosen at random. Every group name referenced must be defined under `groups`, or the config fails to load.
+- **Fixed slot** — `{collection: "<title>"}` — always pins the managed hub with that title. The title matches **any** managed hub — a user collection *or* a built-in Plex system hub (e.g. `collection: Recently Added Movies`). On a title collision the **collection wins** — a system hub is matched only when no collection in the library carries the title (ADR-0007). The `collection:` key name is historical; it accepts system hubs too.
+- **Pick slot** — `{pick: [<group>, ...]}` — walks the groups in order and stops at the first one that has an eligible, non-repeat-blocked, not-already-used collection, then pins one of that group's collections (filtered against *this* section's library) chosen at random. Every group name referenced must be defined under `groups`, or the config fails to load. Pick slots are **collections-only** — their label / min-items filters don't apply to system hubs.
 
-Collections are de-duplicated across all slots and libraries, so the same collection never occupies two slots.
+Hubs are de-duplicated across all slots and libraries, so the same hub never occupies two slots.
 
 **Order is per-library, not global.** Plex groups promoted collections by library and exposes no cross-library home order (that's the account's pinned-source order, set manually in Plex). The tool orders *within* each library block only — you cannot place a TV collection above a Movies one. The resolver emits one flat list grouped by library (mapping order), which the per-section ordering layer honors within each block (ADR-0006).
 
@@ -134,8 +134,9 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 | `src/plex_home/plex_client.py` | Plex data-access layer — connects to PlexServer, fetches collections per library as CollectionInfo objects |
 | `src/plex_home/history.py` | Repeat-block history — tracks pinned collections with timestamps, answers "is this blocked?" |
 | `src/plex_home/resolver.py` | Slot resolver — walks configured home slots, resolves fixed + pick slots (sequential group priority), dedups across slots |
-| `src/plex_home/pinning.py` | Pin/unpin engine — fully manages the home screen (ADR-0002): pins resolved collections, unpins everything else, updates repeat-block history |
-| `src/plex_home/ordering.py` | Hub ordering — reorders home-screen managed hubs to match the resolved slot order via the Plex Move Hub API (`ManagedHub.move`) |
+| `src/plex_home/managed_hubs.py` | Shared kind-agnostic managed-hub primitives (ADR-0007) used by `pinning`/`ordering`/`hubs`: `is_collection`, `on_home`, `promoted_anywhere`, `title_map` (collection wins on title collision), `realize_order` (reverse move-to-top), `iter_library_hubs` (per-library fetch-and-skip for the writers) |
+| `src/plex_home/pinning.py` | Pin engine — fully manages all three visibility axes (ADR-0007): promotes resolved pins (system + collection), `remove()`s non-resolved collections from the managed list, demotes non-resolved system hubs, updates repeat-block history |
+| `src/plex_home/ordering.py` | Hub ordering — reorders each library's pinned hubs to match slot order via `managed_hubs.realize_order` (move-to-top, works for system + Plex-curated hubs) |
 | `src/plex_home/webhook.py` | Optional webhook notifier — POSTs a per-cycle summary (pinned titles + timestamp) when `webhook_url` is configured; never raises |
 | `src/plex_home/simulate.py` | Dry-run simulator (`simulate` subcommand) — advances a simulated clock over N days, re-runs the resolver each cycle against a read-only Plex snapshot, threads history in memory, and renders a text report (timeline + pin frequency + repeat-block PASS/FAIL). Never calls the writers |
 | `src/plex_home/main.py` | Entrypoint logic — builds the subcommand parser and dispatches: `run` → the daemon loop (reload config each cycle, fetch → resolve → pin → order → webhook, sleep, clean SIGINT shutdown, per-cycle error retry); `list`/`pin`/`unpin`/`move` → the CLI handlers. Exposed as the `plex-home` console script and `python -m plex_home` |
@@ -148,7 +149,8 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 | `tests/test_eligibility.py` | Pytest suite for group eligibility engine |
 | `tests/test_plex_client.py` | Pytest suite for Plex client (fully mocked) |
 | `tests/test_resolver.py` | Pytest suite for slot resolver |
-| `tests/test_pinning.py` | Pytest suite for pin/unpin engine (fully mocked) |
+| `tests/test_managed_hubs.py` | Pytest suite for the shared managed-hub primitives (fully mocked) |
+| `tests/test_pinning.py` | Pytest suite for pin engine — promote/remove/demote reconcile (fully mocked) |
 | `tests/test_ordering.py` | Pytest suite for hub ordering (fully mocked) |
 | `tests/test_webhook.py` | Pytest suite for the webhook notifier (fully mocked) |
 | `tests/test_main.py` | Pytest suite for the main loop + run_cycle wiring + subcommand dispatch (fully mocked) |
@@ -167,4 +169,4 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 - **`pin_history.json` is mutable state** — `history.py` rewrites it each cycle (nested `{library: {title: last-pinned UTC timestamp}}`, keyed per-library). Delete it to reset the recency-block history; a missing, corrupt, or legacy flat-format file is handled gracefully (starts fresh).
 - **Tests need `src/` on the path** — `pyproject.toml` sets `pythonpath = ["src"]`, so `.venv/bin/pytest` imports `plex_home` without an install. Running pytest a different way (or importing the modules directly) requires `pip install -e .` or `PYTHONPATH=src` first.
 - **Config errors don't crash the daemon** — `config.py` raises `ConfigError` on any invalid or missing field; `main.py` catches it, logs the message, and retries in 5 minutes (`CONFIG_ERROR_RETRY_MINUTES`) instead of exiting.
-- **Unpin scope is every promoted collection** — ADR-0002 makes the tool the sole manager of the home screen: any collection promoted by other means (e.g. manually in Plex) that isn't in the resolved set is unpinned each cycle. There is no exclusion list.
+- **The config owns all three visibility axes** — ADR-0007 extends ADR-0002 from home-only to Home + Friends' Home + Library Recommended, across system *and* collection hubs. Each cycle any hub the config doesn't pin is swept: a **collection** is `remove()`d from the Managed Recommendations list entirely (the `×` in Plex — `DELETE …/manage/{id}`; it deletes the *recommendation record*, never the collection or its items), and a **system hub** (not removable) is demoted on all three axes. This is what keeps the Recommended list from accreting every collection ever pinned. A collection you pin to Friends'-Home-only or Recommended-only in the Plex UI is removed on the next cycle unless it's in the config. Global `/hubs/home` rows (Continue Watching, On Deck) are not section-managed and are never touched.

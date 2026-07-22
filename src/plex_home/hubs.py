@@ -15,10 +15,9 @@ from plexapi.server import PlexServer
 from plexapi.exceptions import NotFound
 
 from .config import Config, FixedSlot
+from .managed_hubs import is_collection, on_home, realize_order
 
 log = logging.getLogger(__name__)
-
-_COLLECTION_ID_PREFIX = "custom.collection."
 
 
 class HubError(Exception):
@@ -34,16 +33,8 @@ class HubView:
     config_managed: bool  # collection reachable from the config's slots/groups
 
 
-def _is_collection(hub: object) -> bool:
-    return (getattr(hub, "identifier", "") or "").startswith(_COLLECTION_ID_PREFIX)
-
-
 def _kind(hub: object) -> str:
-    return "collection" if _is_collection(hub) else "system"
-
-
-def _is_pinned(hub: object) -> bool:
-    return bool(getattr(hub, "promotedToOwnHome", False) or getattr(hub, "promotedToSharedHome", False))
+    return "collection" if is_collection(hub) else "system"
 
 
 def config_collection_titles(config: Config) -> set[str]:
@@ -72,7 +63,7 @@ def _section(plex: PlexServer, library: str):
 
 def _pinned_hubs(section) -> list:
     """Managed hubs currently pinned to home, in home-screen order."""
-    return [h for h in section.managedHubs() if _is_pinned(h)]
+    return [h for h in section.managedHubs() if on_home(h)]
 
 
 def _resolve(pinned: list, target: str) -> int:
@@ -86,27 +77,6 @@ def _resolve(pinned: list, target: str) -> int:
         if getattr(hub, "title", "") == target:
             return i
     raise HubError(f"No pinned hub matching {target!r}")
-
-
-def _realize_order(section, ordered_titles: list[str], dry_run: bool) -> None:
-    """Reorder the pinned hubs to match ``ordered_titles`` (top → bottom).
-
-    Plex's Move Hub API only honors ``move(after=None)`` — move to top — for
-    *every* hub. Anchoring after a specific hub silently fails for system rows
-    and Plex-curated hubs ("Recently Released", "… On Plex"), which otherwise
-    look like ordinary collections. Moving each hub to the top in **reverse**
-    target order therefore builds any arrangement reliably. Re-fetch by title on
-    each step because curated hub identifiers regenerate over time, so a hub
-    object held across moves can go stale and no-op.
-    """
-    if dry_run:
-        log.info("[dry-run] set order: %s", ", ".join(ordered_titles))
-        return
-    for title in reversed(ordered_titles):
-        section.reload()
-        hub = next((h for h in _pinned_hubs(section) if getattr(h, "title", "") == title), None)
-        if hub is not None:
-            hub.move(after=None)
 
 
 def _target_order(pinned: list, from_index: int, to_index: int) -> list[str]:
@@ -197,7 +167,7 @@ def pin(plex: PlexServer, library: str, title: str, to_index: int | None = None,
         section.reload()
         pinned = _pinned_hubs(section)
         order = _target_order(pinned, _resolve(pinned, title), to_index)
-        _realize_order(section, order, dry_run=False)
+        realize_order(section, order, dry_run=False)
         actual = _verify_placement(section, title, to_index)
         if actual is not None:
             log.info("Placed %r at index %d in %r", title, actual, library)
@@ -224,6 +194,6 @@ def move(plex: PlexServer, library: str, target: str, to_index: int, dry_run: bo
     idx = _resolve(pinned, target)
     title = getattr(pinned[idx], "title", "")
     order = _target_order(pinned, idx, to_index)
-    _realize_order(section, order, dry_run)
+    realize_order(section, order, dry_run)
     if not dry_run:
         _verify_placement(section, title, to_index)

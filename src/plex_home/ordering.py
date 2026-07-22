@@ -3,9 +3,9 @@ import logging
 from dataclasses import dataclass, field
 
 from plexapi.server import PlexServer
-from plexapi.exceptions import NotFound
 
 from .resolver import ResolvedPin
+from .managed_hubs import title_map, realize_order, iter_library_hubs
 
 log = logging.getLogger(__name__)
 
@@ -13,73 +13,35 @@ log = logging.getLogger(__name__)
 @dataclass
 class OrderResult:
     moved: list[str] = field(default_factory=list)    # hubs successfully repositioned
-    failed: list[str] = field(default_factory=list)   # hubs whose Move Hub call errored
-
-
-def _managed_hubs_by_title(section) -> dict[str, object]:
-    """Map managed-hub title → ManagedHub for one library section.
-
-    Only managed recommendation hubs (promoted collections) are returned by
-    ``section.managedHubs()`` — Plex system hubs never surface here.
-    """
-    by_title: dict[str, object] = {}
-    for hub in section.managedHubs():
-        title = getattr(hub, "title", None)
-        if title is not None:
-            by_title[title] = hub
-    return by_title
+    failed: list[str] = field(default_factory=list)   # hubs whose move errored or vanished
 
 
 def apply_order(plex: PlexServer, library_names: list[str], resolved: list[ResolvedPin]) -> OrderResult:
-    """Reorder each library's home-screen managed hubs to match slot order (issue #9).
+    """Reorder each library's pinned hubs to match slot order (ADR-0007).
 
-    The Plex Move Hub API is per-section: ``ManagedHub.move`` targets the hub's
-    own library, and an ``after=`` anchor from a different section is a foreign
-    identifier Plex cannot honor. So ordering is applied **one library at a
-    time** — for each library, the resolved titles that belong to it are walked
-    in order, the first moved to the top (``after=None``) and each subsequent
-    one after the previous, resetting the anchor at every library boundary.
+    Ordering is per-section: a hub's ``move`` targets its own library, so each
+    library is ordered independently. For each library, the resolved titles that
+    are present in the Managed Recommendations list are walked in slot order and
+    realized via move-to-top (``managed_hubs.realize_order``), which reliably
+    positions system and Plex-curated hubs that reject an ``after=`` anchor.
 
-    Only hubs whose title matches a resolved collection are moved, so Plex
-    system hubs are never reordered. A Move Hub error on a single hub is logged
-    and does not abort the rest. A library with fewer than two matching hubs
-    needs no move.
+    Only resolved titles are moved: the resolved pins are lifted to the top in
+    slot order, so any system hubs the config doesn't name settle below them
+    while keeping their order relative to one another. A library with fewer than
+    two resolved hubs needs no move.
     """
     result = OrderResult()
 
-    for name in library_names:
-        try:
-            section = plex.library.section(name)
-        except NotFound:
-            log.warning("Library %r not found during ordering — skipping", name)
-            continue
-        except Exception as e:
-            log.warning("Could not fetch library %r during ordering: %s — skipping", name, e)
-            continue
-        try:
-            by_title = _managed_hubs_by_title(section)
-        except Exception as e:
-            log.warning("Could not list managed hubs in %r: %s — skipping", name, e)
-            continue
+    for name, section, hubs in iter_library_hubs(plex, library_names, "ordering"):
+        present = title_map(hubs)
 
-        ordered = [
-            (p.title, by_title[p.title])
-            for p in resolved
-            if p.library == name and p.title in by_title
-        ]
+        ordered = [p.title for p in resolved if p.library == name and p.title in present]
         if len(ordered) < 2:
             continue
 
-        prev = None
-        for title, hub in ordered:
-            try:
-                hub.move(after=prev)
-            except Exception as e:
-                log.error("Failed to move hub %r into position: %s", title, e)
-                result.failed.append(title)
-                continue
-            result.moved.append(title)
-            prev = hub
+        moved, failed = realize_order(section, ordered, dry_run=False)
+        result.moved.extend(moved)
+        result.failed.extend(failed)
 
     log.info("Hub ordering complete: %d moved, %d failed", len(result.moved), len(result.failed))
     return result

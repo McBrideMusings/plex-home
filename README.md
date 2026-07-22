@@ -2,17 +2,17 @@
 
 Plex Home is a Python daemon that automatically manages which collections are **pinned** (promoted to the home screen) on a Plex Media Server.
 
-Every cycle it resolves an ordered list of home-screen **slots** — each slot is either a fixed collection or a **pick** that chooses the first eligible collection from a list of named groups — then fully manages the home screen: it pins the resolved set, unpins every other promoted collection, and reorders the pinned hubs to match slot order. It logs to stdout and optionally POSTs a per-cycle summary to a webhook.
+Every cycle it resolves an ordered list of home-screen **slots** — each slot is either a fixed hub (a collection *or* a built-in Plex system hub) or a **pick** that chooses the first eligible collection from a list of named groups — then fully manages the home screen: it promotes the resolved set, sweeps every other promoted hub (removing stray collections from the Managed Recommendations list, demoting stray system hubs), and reorders the pinned hubs to match slot order. It logs to stdout and optionally POSTs a per-cycle summary to a webhook.
 
 It also ships an imperative CLI (`list` / `pin` / `unpin` / `move`) for driving the live home screen by hand, independent of the config.
 
 ## How it works
 
 - **Ordered slots, not a random pool.** You declare the home screen as an ordered list. Slot 1 is the first hub, slot 2 the second, and so on — Plex Home moves the pinned hubs into exactly that order each cycle.
-- **Fixed or pick per slot.** A fixed slot always pins one named collection. A pick slot walks a priority list of groups and stops at the first group that has an eligible, non-repeat-blocked, not-already-used collection, then pins one of that group's collections at random.
+- **Fixed or pick per slot.** A fixed slot always pins one named hub — a collection or a Plex system hub (e.g. `Recently Added Movies`), matched by title (collection wins on a title collision). A pick slot walks a priority list of groups and stops at the first group that has an eligible, non-repeat-blocked, not-already-used collection, then pins one of that group's collections at random (picks are collections-only).
 - **Groups scope collections and when they apply.** A group targets one library and can be gated by a date window (e.g. `10-01/10-31` for October), a time-of-day window, label filters, and collection include/exclude lists.
 - **Repeat blocking.** A pinned collection is blocked from re-pinning for `repeat_block_hours` so the home screen stays varied.
-- **Sole manager of the home screen.** Anything promoted by other means that isn't in the resolved set is unpinned each cycle — there is no exclusion list.
+- **Sole manager across all three visibility axes.** The config is the complete truth for Home, Friends' Home, and Library Recommended. Any hub not in the resolved set is swept each cycle — a stray collection is removed from the Managed Recommendations list (the `×` in Plex; it drops the recommendation record, never the collection itself), a stray system hub is demoted. This keeps the Recommended list from growing without bound. See [ADR-0007](docs/adr/0007-hub-uniform-full-management.md).
 
 ## Install
 
@@ -83,7 +83,7 @@ home:
 | `library_names` | Libraries to manage (required) |
 | `cadence` | `interval_minutes` (required), `repeat_block_hours` (default 24), `min_items_for_pinning` (default 10) |
 | `groups` | Named collection groups a `pick` slot draws from — each with optional `date`/`time`/`include_labels`/`include_collections`/`exclude_labels`/`exclude_collections` and per-group cadence overrides. A group carries **no** library; its library is the `home` section that references it (so the same group may be reused under more than one library). |
-| `home` | Mapping of **library name → ordered list of slots**; each slot is `{collection: "<title>"}` or `{pick: [<group>, ...]}`. Every key must be one of `library_names`. |
+| `home` | Mapping of **library name → ordered list of slots**; each slot is `{collection: "<title>"}` (any managed hub by title — collection or system) or `{pick: [<group>, ...]}` (collections only). Every key must be one of `library_names`. |
 | `webhook_url` | Optional; POSTs a per-cycle summary of pinned titles |
 
 **Home order is per-library, not global.** Plex renders promoted collections grouped by library, and exposes no way to reorder the library blocks themselves (that's your account's pinned-source order, set by hand in Plex). So the list under each `home` library sets the order *within that library's block only*; you cannot lift a TV collection above a Movies one. See [ADR-0006](docs/adr/0006-per-library-home-mapping.md).

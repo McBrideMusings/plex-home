@@ -8,41 +8,48 @@ from plexapi.exceptions import NotFound
 
 from .history import record_pins
 from .resolver import ResolvedPin
+from .managed_hubs import (
+    is_collection,
+    on_home,
+    promoted_anywhere,
+    hub_title,
+    title_map,
+    iter_library_hubs,
+)
 
 log = logging.getLogger(__name__)
 
 
 @dataclass
 class PinResult:
-    pinned: list[ResolvedPin] = field(default_factory=list)      # newly promoted this run
-    unpinned: list[ResolvedPin] = field(default_factory=list)    # demoted this run
-    unchanged: list[ResolvedPin] = field(default_factory=list)   # already promoted and still resolved
-    missing: list[ResolvedPin] = field(default_factory=list)     # resolved but no matching live collection
+    pinned: list[ResolvedPin] = field(default_factory=list)      # resolved, newly promoted this run
+    unchanged: list[ResolvedPin] = field(default_factory=list)   # resolved, already on home
+    unpinned: list[ResolvedPin] = field(default_factory=list)    # system hub demoted (can't remove)
+    removed: list[ResolvedPin] = field(default_factory=list)     # collection removed from managed list
+    missing: list[ResolvedPin] = field(default_factory=list)     # resolved but no matching collection
     history: dict[tuple[str, str], datetime] = field(default_factory=dict)
 
 
-def _iter_live_collections(plex: PlexServer, library_names: list[str]):
-    """Yield ``(library_name, live plexapi Collection)`` across the managed libraries.
+def _resolve_target(section, by_title: dict, title: str):
+    """Resolve a fixed-slot title to the live ``ManagedHub`` to promote.
 
-    Only user collections are returned — Plex system hubs (Recently Added,
-    Continue Watching, On Deck) are not collections and never surface here.
-    The library name is yielded alongside each collection because collection
-    titles are only unique within a library.
+    Collection wins on a title collision, and does so even when the collection is
+    absent from the managed list (previously removed, or never promoted) while a
+    same-titled *system* hub is present:
+
+    - a managed **collection** of this title → use it directly;
+    - else a **collection** in the library → re-create its record via
+      ``visibility()`` — it beats any system twin;
+    - else a managed **system** hub of this title → use it;
+    - else → ``None`` (nothing matches; the pin is reported missing).
     """
-    for name in library_names:
-        try:
-            section = plex.library.section(name)
-        except NotFound:
-            log.warning("Library %r not found during pin run — skipping", name)
-            continue
-        except Exception as e:
-            log.warning("Could not fetch library %r during pin run: %s — skipping", name, e)
-            continue
-        try:
-            for coll in section.collections():
-                yield name, coll
-        except Exception as e:
-            log.warning("Could not list collections in %r: %s — skipping", name, e)
+    hub = by_title.get(title)
+    if hub is not None and is_collection(hub):
+        return hub
+    try:
+        return section.collection(title).visibility()
+    except NotFound:
+        return hub  # a system hub of this title, or None
 
 
 def apply_pins(
@@ -51,75 +58,79 @@ def apply_pins(
     resolved: list[ResolvedPin],
     history: dict[tuple[str, str], datetime],
 ) -> PinResult:
-    """Fully manage the pinned home screen (ADR-0002).
+    """Fully manage the home screen and the Managed Recommendations list (ADR-0007).
 
-    Pin every collection in ``resolved`` that is not already promoted, unpin
-    every currently-promoted collection that is not in ``resolved``, and leave
-    already-pinned-and-resolved collections untouched. Collections are keyed by
-    ``(library, title)``, so two collections sharing a title in different
-    libraries are managed independently. Records the pins that remain after the
-    run in the repeat-block history and returns it on the result. A Plex error
-    on a single pin/unpin is logged and does not abort the rest of the run.
+    The config is the complete truth for everything promoted anywhere. Per
+    library, over ``section.managedHubs()`` (system + collection rows uniformly):
+
+    1. Resolved pins → promote to home + friends' home (Recommended left as-is).
+       A resolved collection absent from the managed list (previously removed or
+       never promoted) is re-created via its collection visibility.
+    2. Non-resolved **collection** → ``remove()`` from the Managed Recommendations
+       list entirely — the ``×`` in Plex, ``DELETE …/manage/{id}``. This does NOT
+       delete the collection itself, only its recommendation record, so the list
+       stays short instead of accreting every collection ever pinned.
+    3. Non-resolved **system hub** that is promoted anywhere → demote all three
+       axes (system hubs are not removable).
+
+    Hubs are keyed by ``(library, title)``. On a title collision the collection
+    wins (``title_map``). A Plex error on a single hub is logged and does not
+    abort the rest. Records the pins that remain in the repeat-block history.
     """
-    resolved_set = set(resolved)
     result = PinResult(history=dict(history))
 
-    live_by_key: dict[ResolvedPin, object] = {}
-    hub_by_key: dict[ResolvedPin, object] = {}
-    promoted: set[ResolvedPin] = set()
-    for name, coll in _iter_live_collections(plex, library_names):
-        title = getattr(coll, "title", None)
-        if title is None:
-            continue
-        key = ResolvedPin(name, title)
-        live_by_key[key] = coll
-        try:
-            hub = coll.visibility()
-        except Exception as e:
-            log.error("Could not read promotion state for %r in %r: %s", title, name, e)
-            continue
-        hub_by_key[key] = hub
-        if hub.promotedToOwnHome or hub.promotedToSharedHome:
-            promoted.add(key)
+    for name, section, hubs in iter_library_hubs(plex, library_names, "pin run"):
+        by_title = title_map(hubs)
 
-    to_pin = [p for p in resolved if p not in promoted]
-    to_unpin = [p for p in promoted if p not in resolved_set]
+        # 1. Promote (or re-create) every resolved pin for this library. Track the
+        #    exact live hub each pin resolved to (by identity) so the sweep leaves
+        #    it alone — the resolved hub, and only it, is protected.
+        kept: set[int] = set()
+        for pin in [p for p in resolved if p.library == name]:
+            target = _resolve_target(section, by_title, pin.title)
+            if target is None:
+                result.missing.append(pin)
+                log.warning("Resolved hub %r in %r not found in Plex — cannot pin", pin.title, name)
+                continue
+            try:
+                already = on_home(target)
+                target.updateVisibility(home=True, shared=True)
+                (result.unchanged if already else result.pinned).append(pin)
+                kept.add(id(target))
+                log.info("%s %r in %r", "Kept pinned" if already else "Pinned", pin.title, name)
+            except Exception as e:
+                log.error("Failed to pin %r in %r: %s", pin.title, name, e)
 
-    for pin in to_pin:
-        coll = live_by_key.get(pin)
-        if coll is None:
-            log.warning("Resolved collection %r in %r not found in Plex — cannot pin", pin.title, pin.library)
-            result.missing.append(pin)
-            continue
-        try:
-            hub = hub_by_key.get(pin) or coll.visibility()
-            hub.promoteHome()
-            hub.promoteShared()
-            result.pinned.append(pin)
-            log.info("Pinned %r in %r", pin.title, pin.library)
-        except Exception as e:
-            log.error("Failed to pin %r in %r: %s", pin.title, pin.library, e)
+        # 2 + 3. Sweep every hub the config does not pin.
+        for hub in hubs:
+            if id(hub) in kept:
+                continue
+            title = hub_title(hub)
+            if title is None:
+                continue
+            key = ResolvedPin(name, title)
 
-    for pin in to_unpin:
-        coll = live_by_key.get(pin)
-        if coll is None:
-            continue
-        try:
-            hub = hub_by_key.get(pin) or coll.visibility()
-            hub.demoteHome()
-            hub.demoteShared()
-            result.unpinned.append(pin)
-            log.info("Unpinned %r in %r", pin.title, pin.library)
-        except Exception as e:
-            log.error("Failed to unpin %r in %r: %s", pin.title, pin.library, e)
-
-    result.unchanged = [p for p in resolved if p in promoted and p in live_by_key]
+            if is_collection(hub) and getattr(hub, "deletable", True):
+                try:
+                    hub.remove()
+                    result.removed.append(key)
+                    log.info("Removed managed collection %r in %r", title, name)
+                except Exception as e:
+                    log.error("Failed to remove %r in %r: %s", title, name, e)
+            elif promoted_anywhere(hub):
+                try:
+                    hub.updateVisibility(recommended=False, home=False, shared=False)
+                    result.unpinned.append(key)
+                    log.info("Demoted system hub %r in %r", title, name)
+                except Exception as e:
+                    log.error("Failed to demote %r in %r: %s", title, name, e)
 
     pinned_now = result.pinned + result.unchanged
     result.history = record_pins([(p.library, p.title) for p in pinned_now], history)
 
     log.info(
-        "Pin run complete: %d pinned, %d unpinned, %d unchanged, %d missing",
-        len(result.pinned), len(result.unpinned), len(result.unchanged), len(result.missing),
+        "Pin run complete: %d pinned, %d unchanged, %d removed, %d demoted, %d missing",
+        len(result.pinned), len(result.unchanged), len(result.removed),
+        len(result.unpinned), len(result.missing),
     )
     return result
