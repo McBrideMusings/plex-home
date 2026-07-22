@@ -17,7 +17,7 @@ Declarative Plex home-screen manager. Defines an ordered list of slots; each slo
 - **Repeat block** — A recency window (`repeat_block_hours`) that prevents the same collection from being picked again within N hours. Bypassable per group with `repeat_block_hours: 0`.
 - **Seasonal group** — A group with a `date:` constraint that makes it eligible only during a specific annual date range (e.g. Oct 1–31 for Halloween content). Previously called "special collections" in the original codebase — avoid that term.
 - **Config-managed hub / Manual hub** — A pinned collection whose title is in the daemon's resolved config set is *config-managed*; one pinned but absent from the config (e.g. via the CLI or the Plex UI) is *manual*. The CLI's `list` computes this by comparing live hubs against the resolved config, not from any Plex label. A running daemon cycle reconciles the home screen back to the config, so manual pins are ephemeral against it.
-- **Cross-library collection** — Two collections sharing a title across different libraries (e.g. a `Star Trek` collection in both Movies and TV Shows). Plex does **not** merge them: each pins as its own hub, keyed per library. There is no cross-library hub, so "one themed row spanning libraries" is not achievable by naming alone (verified — see below).
+- **Cross-library collection** — Two collections sharing a title across different libraries (e.g. a `Star Trek` collection in both Movies and TV Shows). **Pinning both is fully supported** — everything is keyed `(library, title)`, so each is an independent hub with its own repeat-block history. What Plex will not do is *merge* them into a single row; there is no cross-library hub (verified — see below).
 
 ### Architecture
 
@@ -51,6 +51,7 @@ Hub identity embeds the **library section key** and the collection's **ratingKey
 
 **Consequences for this tool:**
 
-- Cross-library themed grouping is **not** achievable by naming collections identically. It needs a different mechanism — a playlist, or accepting two separate hubs.
-- Even pinning both, they cannot be made adjacent on the home screen: hub order is per-library (ADR-0006), so the two rows land in different library blocks and no cross-library ordering exists.
+- **Pinning both is supported and needs no new work.** Give each library a slot with the same title, or run `plex-home pin "<Title>" --library <Name>` once per library. Pins, repeat-block history, and hub ordering are all keyed per library — covered by `test_resolver.py::test_same_title_in_two_libraries_both_resolve`, `test_pinning.py::test_same_title_across_libraries_managed_independently`, `test_history.py`, and `test_ordering.py::test_same_title_in_other_library_not_reordered`. The bare CLI form without `--library` deliberately errors on the ambiguity rather than guessing.
+- What is **not** achievable is a single *merged* row — and that is a Plex limitation, not a gap in this tool. The Plex GUI issues the same promote and also gets two rows. A genuinely unified themed row would need a different mechanism (e.g. a playlist).
+- The two rows also cannot be made adjacent: hub order is per-library (ADR-0006), so they land in different library blocks and no cross-library ordering exists.
 - Three titles already occur in more than one library on this server (`Star Trek`, `IMDb Popular`, `Streaming Collections`). Each is an independent hub, and each is blocked independently by repeat-block history, which is keyed `(library, title)` — consistent with this finding.
