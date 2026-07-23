@@ -94,25 +94,8 @@ def iter_library_hubs(
         yield name, section, hubs
 
 
-def realize_order(section, ordered_titles: list[str], dry_run: bool = False) -> tuple[list[str], list[str]]:
-    """Reorder a library's pinned hubs to ``ordered_titles`` (top → bottom).
-
-    Plex's Move Hub API only reliably honors ``move(after=None)`` — move to top —
-    for *every* hub. Anchoring after a specific hub silently fails for system rows
-    and Plex-curated hubs ("Recently Released", "… On Plex"), which otherwise look
-    like ordinary collections. Moving each hub to the top in **reverse** target
-    order therefore builds any arrangement. Re-fetch the pinned hubs by title on
-    each step because curated hub identifiers regenerate over time, so a hub held
-    across moves can go stale and no-op.
-
-    Returns ``(moved, failed)`` — titles that were successfully repositioned and
-    titles whose move raised or that were no longer pinned — both in target order.
-    A per-hub move error is logged and does not abort the rest.
-    """
-    if dry_run:
-        log.info("[dry-run] set order: %s", ", ".join(ordered_titles))
-        return list(ordered_titles), []
-
+def _move_to_top_pass(section, ordered_titles: list[str]) -> tuple[list[str], list[str]]:
+    """One reverse move-to-top pass. Returns ``(moved, failed)`` in target order."""
     done: set[str] = set()
     bad: set[str] = set()
     for title in reversed(ordered_titles):
@@ -134,3 +117,65 @@ def realize_order(section, ordered_titles: list[str], dry_run: bool = False) -> 
     moved = [t for t in ordered_titles if t in done]
     failed = [t for t in ordered_titles if t in bad and t not in done]
     return moved, failed
+
+
+def _read_home_order(section, ordered_titles: list[str]) -> list[str]:
+    """Re-read the section and return the on-home titles that are in
+    ``ordered_titles``, in their live home-screen order. This is what the reorder
+    actually produced, filtered to the titles we tried to place."""
+    try:
+        section.reload()
+    except Exception:
+        pass
+    wanted = set(ordered_titles)
+    return [t for h in section.managedHubs() if on_home(h) and (t := hub_title(h)) in wanted]
+
+
+def realize_order(
+    section, ordered_titles: list[str], dry_run: bool = False
+) -> tuple[list[str], list[str], list[str]]:
+    """Reorder a library's pinned hubs to ``ordered_titles`` (top → bottom).
+
+    Plex's Move Hub API only reliably honors ``move(after=None)`` — move to top —
+    for *every* hub. Anchoring after a specific hub silently fails for system rows
+    and Plex-curated hubs ("Recently Released", "… On Plex"), which otherwise look
+    like ordinary collections. Moving each hub to the top in **reverse** target
+    order therefore builds any arrangement. Re-fetch the pinned hubs by title on
+    each step because curated hub identifiers regenerate over time, so a hub held
+    across moves can go stale and no-op.
+
+    A move Plex accepts but does not apply raises nothing, so a per-hub "moved"
+    tally cannot tell a realized order from a silently-dropped one. After the pass
+    we re-read the live home order and compare it to the target; on a mismatch we
+    run the move-to-top loop **once** more and re-read (a single retry so a
+    genuinely unorderable hub cannot spin), then report whatever the final read
+    shows.
+
+    Returns ``(moved, failed, actual)`` — titles successfully repositioned, titles
+    whose move raised or that were no longer pinned (both in target order), and
+    ``actual``, the live home order filtered to ``ordered_titles``. ``actual ==
+    ordered_titles`` means the order verified; any other value is the real,
+    still-wrong order and the caller surfaces it. A per-hub move error is logged
+    and does not abort the rest.
+    """
+    if dry_run:
+        log.info("[dry-run] set order: %s", ", ".join(ordered_titles))
+        return list(ordered_titles), [], list(ordered_titles)
+
+    moved, failed = _move_to_top_pass(section, ordered_titles)
+    actual = _read_home_order(section, ordered_titles)
+
+    if actual != ordered_titles:
+        log.warning(
+            "Hub order did not match after move — retrying once. target=%s actual=%s",
+            ordered_titles, actual,
+        )
+        moved, failed = _move_to_top_pass(section, ordered_titles)
+        actual = _read_home_order(section, ordered_titles)
+        if actual != ordered_titles:
+            log.warning(
+                "Hub order still wrong after retry. target=%s actual=%s",
+                ordered_titles, actual,
+            )
+
+    return moved, failed, actual
