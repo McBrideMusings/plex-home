@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 from plexapi.exceptions import NotFound
 
 from plex_home import ordering
+from plex_home.ordering import OrderMismatch
 from plex_home.resolver import ResolvedPin
 
 
@@ -168,6 +169,25 @@ def test_no_managed_hubs_skipped():
     plex = make_plex({"Movies": make_section([])})
     result = ordering.apply_order(plex, ["Movies"], mv("A", "B"))
     assert result.moved == []
+
+
+def test_order_mismatch_reported_not_swallowed():
+    # Plex accepts every move but leaves the hubs in the wrong order (the live bug).
+    # managedHubs() keeps returning [B, A] while we asked for [A, B]. The mismatch
+    # must be surfaced on result.mismatch, not counted as a clean move.
+    a, b = make_hub("A", 1), make_hub("B", 2)
+    for h in (a, b):
+        h.move.side_effect = lambda after=None: None   # accepted, no effect
+    plex = make_plex({"Movies": make_section([b, a])})   # stuck order, target is A,B
+    result = ordering.apply_order(plex, ["Movies"], mv("A", "B"))
+    assert result.mismatch == [OrderMismatch("Movies", ["A", "B"], ["B", "A"])]
+
+
+def test_verified_order_records_no_mismatch():
+    a, b = make_hub("A", 1), make_hub("B", 2)
+    plex = make_plex({"Movies": make_section([a, b])})   # already in target order
+    result = ordering.apply_order(plex, ["Movies"], mv("A", "B"))
+    assert result.mismatch == []
 
 
 def test_managed_hubs_fetch_error_skips_library():

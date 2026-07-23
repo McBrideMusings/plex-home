@@ -105,24 +105,58 @@ def make_reorderable_section(titles):
 
 def test_realize_order_builds_arbitrary_target():
     section, live = make_reorderable_section(["A", "B", "C", "D"])
-    moved, failed = mh.realize_order(section, ["C", "A", "D", "B"])
+    moved, failed, actual = mh.realize_order(section, ["C", "A", "D", "B"])
     assert [h.title for h in live] == ["C", "A", "D", "B"]
     assert moved == ["C", "A", "D", "B"]
     assert failed == []
+    assert actual == ["C", "A", "D", "B"]   # verified against the live order
 
 
 def test_realize_order_dry_run_is_noop():
     section, live = make_reorderable_section(["A", "B", "C"])
-    moved, failed = mh.realize_order(section, ["C", "B", "A"], dry_run=True)
+    moved, failed, actual = mh.realize_order(section, ["C", "B", "A"], dry_run=True)
     assert [h.title for h in live] == ["A", "B", "C"]
     assert moved == ["C", "B", "A"]
     assert failed == []
+    assert actual == ["C", "B", "A"]
 
 
 def test_realize_order_reports_move_failure_in_target_order():
     section, live = make_reorderable_section(["A", "B", "C"])
     b = next(h for h in live if h.title == "B")
     b.move.side_effect = RuntimeError("locked")
-    moved, failed = mh.realize_order(section, ["A", "B", "C"])
+    moved, failed, _actual = mh.realize_order(section, ["A", "B", "C"])
     assert moved == ["A", "C"]
     assert failed == ["B"]
+
+
+def test_realize_order_reports_actual_order_on_unapplied_move():
+    # A section that ACCEPTS every move but never actually reorders — the live bug:
+    # move() raises nothing, yet the home order stays wrong. The retry runs and the
+    # final read still shows the un-applied order, which is surfaced as `actual`.
+    section = MagicMock()
+    live = [collection(t, i, own=True) for i, t in enumerate(["A", "B", "C"])]
+    for h in live:
+        h.move.side_effect = lambda after=None: None   # accepted, no effect
+    section.managedHubs.return_value = live
+    moved, failed, actual = mh.realize_order(section, ["C", "B", "A"])
+    assert actual == ["A", "B", "C"]      # real order — NOT the requested ["C","B","A"]
+    assert actual != ["C", "B", "A"]
+
+
+def test_realize_order_retries_once_then_stops():
+    # Count move calls: a persistent mismatch must run the loop exactly twice
+    # (initial + one retry), never spin.
+    section = MagicMock()
+    live = [collection(t, i, own=True) for i, t in enumerate(["A", "B", "C"])]
+    section.managedHubs.return_value = live
+    mh.realize_order(section, ["C", "B", "A"])   # static list → always mismatches
+    for h in live:
+        assert h.move.call_count == 2   # one initial pass + exactly one retry
+
+
+def test_realize_order_no_retry_when_first_pass_verifies():
+    section, live = make_reorderable_section(["A", "B", "C"])
+    mh.realize_order(section, ["C", "B", "A"])
+    for h in live:
+        assert h.move.call_count == 1   # verified first time → no retry
