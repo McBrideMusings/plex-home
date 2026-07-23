@@ -8,6 +8,7 @@ from .config import Config, FixedSlot, PickSlot
 from .plex_client import CollectionInfo
 from .history import is_blocked
 from .eligibility import eligible_collections
+from .matching import parse_spec, title_matches
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +56,11 @@ def resolve_slots(
     for library, slots in config.home.items():
         for slot in slots:
             if isinstance(slot, FixedSlot):
-                pin = ResolvedPin(library, slot.collection)
+                title = _resolve_fixed_title(slot.collection, all_collections.get(library, []))
+                if title is None:
+                    log.info("Fixed slot %r in %r matched no collection — skipping", slot.collection, library)
+                    continue
+                pin = ResolvedPin(library, title)
                 if pin in used:
                     continue
                 resolved.append(pin)
@@ -71,6 +76,23 @@ def resolve_slots(
                     used.add(pin)
 
     return resolved
+
+
+def _resolve_fixed_title(spec: str, collections: list[CollectionInfo]) -> str | None:
+    """Resolve a fixed slot's collection spec to a single title.
+
+    An exact spec pins its title blindly — the historical behaviour, unchanged,
+    with no existence check against the live collection list. A ``glob:``/``re:``
+    pattern matches against the library's collection titles and takes the first
+    by title sort (deterministic); it resolves to ``None`` when nothing matches,
+    so the slot pins nothing that cycle rather than erroring. First-by-sort is a
+    uniform fallback — the real use case (``{YEAR}``) is exact and matches one.
+    """
+    mode, pattern = parse_spec(spec)
+    if mode == "exact":
+        return pattern
+    matches = sorted(c.title for c in collections if title_matches(spec, c.title))
+    return matches[0] if matches else None
 
 
 def _resolve_pick(

@@ -1,9 +1,12 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Union
 import re
 import yaml
+
+from . import matching
 
 _DATE_RE = re.compile(r"^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])/(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$")
@@ -94,6 +97,8 @@ def load_config(path: str) -> Config:
     groups = _parse_groups(raw["groups"])
     home = _parse_home(raw["home"], groups, library_names)
 
+    _expand_templates(home, groups, datetime.now(timezone.utc))
+
     return Config(
         plex_url=plex_url,
         plex_token=plex_token,
@@ -104,6 +109,41 @@ def load_config(path: str) -> Config:
         webhook_url=webhook_url,
         history_path=Path(path).resolve().parent / "pin_history.json",
     )
+
+
+def _expand_templates(
+    home: dict[str, list[Slot]], groups: dict[str, Group], now: datetime
+) -> None:
+    """Expand ``{YEAR}``-style variables in every collection-title spec in place.
+
+    Runs once at load; since the daemon reloads config each cycle, this re-resolves
+    the current year/month/week/day for free. Also validates that any ``re:`` spec
+    compiles, so a bad regex fails fast with a ``ConfigError`` at load rather than
+    mid-cycle. Only the three title-bearing fields are templated — fixed-slot
+    collections and group include/exclude collection lists — never labels.
+    """
+    def _expand(spec: str, loc: str) -> str:
+        expanded = matching.expand_variables(spec, now)
+        mode, pattern = matching.parse_spec(expanded)
+        if mode == "regex":
+            try:
+                re.compile(pattern)
+            except re.error as e:
+                raise ConfigError(f"{loc} has an invalid regex {pattern!r}: {e}")
+        return expanded
+
+    for library, slots in home.items():
+        for i, slot in enumerate(slots):
+            if isinstance(slot, FixedSlot):
+                slot.collection = _expand(slot.collection, f"home['{library}'][{i}].collection")
+
+    for name, group in groups.items():
+        group.include_collections = [
+            _expand(s, f"group '{name}'.include_collections") for s in group.include_collections
+        ]
+        group.exclude_collections = [
+            _expand(s, f"group '{name}'.exclude_collections") for s in group.exclude_collections
+        ]
 
 
 def _require_fields(d: dict, fields: list[str]) -> None:

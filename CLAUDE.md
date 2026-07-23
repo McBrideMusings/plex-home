@@ -81,7 +81,7 @@ A mapping of group name → group definition. Each group scopes a set of collect
 | `repeat_block_hours` | inherits `cadence` | Per-group override of the recency block |
 | `min_items_for_pinning` | inherits `cadence` | Per-group override of the min-items threshold |
 
-**How the four filter keys combine** (`eligibility.py:matches_group_membership`). All four are lists of exact, case-sensitive strings — no globs, no substrings.
+**How the four filter keys combine** (`eligibility.py:matches_group_membership`). The two `*_labels` keys are exact, case-sensitive strings. The two `*_collections` keys are **title specs** (see below): each entry is exact by default, or a `glob:`/`re:` pattern, and may embed `{YEAR}`/`{MONTH}`/`{WEEK}`/`{DAY}` variables.
 
 1. The two `include_*` keys are **OR'd**, not AND'd: a collection is in scope if it carries **any** listed label **or** its title is in `include_collections`. Listing both widens the candidate set.
 2. Omitting both includes means **the whole library** the referencing `home` section names.
@@ -90,11 +90,20 @@ A mapping of group name → group definition. Each group scopes a set of collect
 
 Filters are a **pick-slot concept only**. A fixed slot pins its title with no label, exclude, or min-items check, so excluding a title in a group does not stop a fixed slot elsewhere from pinning it. Labels are read off the collection object (`collection.labels`), not from the genres or labels of the items inside it.
 
+### Title specs — patterns and variables (`matching.py`)
+
+Any place a config value names a **collection title** — a fixed slot's `collection`, a group's `include_collections`/`exclude_collections` — accepts a *title spec* rather than a bare literal. `matching.py` owns this. A spec has two independent, composable parts:
+
+- **Match mode**, chosen by a leading sigil: bare = **exact** (string equality — the historical behaviour), `glob:` = shell-style wildcard (`glob:Marvel *`, matched with `fnmatchcase`), `re:` = regular expression (`re:Oscars Death Race \d{4}`). All three match the **whole** title; glob is case-sensitive; a bad `re:` pattern fails fast with `ConfigError` at config load.
+- **Variables** `{YEAR}` (`%Y`), `{MONTH}` (`%m`), `{WEEK}` (ISO week `%V`), `{DAY}` (`%d`), expanded against the current UTC time **once at config load** (`config._expand_templates`). Because the daemon reloads config every cycle, `Oscars Death Race {YEAR}` re-resolves to the current year each cycle with no extra machinery. Variables and sigils compose (`re:Oscars {YEAR}`); expansion runs before the regex compiles, so `{YEAR}` is never mistaken for a regex quantifier.
+
+**Fixed slots vs pick-slot filters differ on multi-match**, because a fixed slot pins exactly one hub while a group filter is a set test. An exact fixed slot pins its title **blindly** (no existence check — unchanged). A **pattern** fixed slot matches against the library's live collection titles and takes the **first by title sort** (deterministic; e.g. glob picks the *oldest* year), or pins nothing that cycle if none match — never an error. In group filters a pattern simply matches every title it fits. `simulate` expands `{YEAR}` at wall-clock time, not its simulated clock, so a far-future simulation still shows the current year in templated titles.
+
 ### `home` slots
 
 A mapping of **library name → ordered list of slots**. Every key must be one of `library_names`, or the config fails to load. Within a library, the list order is the home-screen order its pinned hubs are moved into. Each slot is exactly one of:
 
-- **Fixed slot** — `{collection: "<title>"}` — always pins the managed hub with that title. The title matches **any** managed hub — a user collection *or* a built-in Plex system hub (e.g. `collection: Recently Added Movies`). On a title collision the **collection wins** — a system hub is matched only when no collection in the library carries the title (ADR-0007). The `collection:` key name is historical; it accepts system hubs too.
+- **Fixed slot** — `{collection: "<title>"}` — always pins the managed hub with that title. The title is a **title spec** (exact, `glob:`, or `re:`, with `{YEAR}`-style variables — see "Title specs" above); an exact spec pins blindly, a pattern spec takes the first live-collection title by sort. The title matches **any** managed hub — a user collection *or* a built-in Plex system hub (e.g. `collection: Recently Added Movies`). On a title collision the **collection wins** — a system hub is matched only when no collection in the library carries the title (ADR-0007). The `collection:` key name is historical; it accepts system hubs too.
 - **Pick slot** — `{pick: [<group>, ...]}` — walks the groups in order and stops at the first one that has an eligible, non-repeat-blocked, not-already-used collection, then pins one of that group's collections (filtered against *this* section's library) chosen at random. Every group name referenced must be defined under `groups`, or the config fails to load. Pick slots are **collections-only** — their label / min-items filters don't apply to system hubs.
 
 Hubs are de-duplicated across all slots and libraries, so the same hub never occupies two slots.
@@ -140,7 +149,8 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 | File | Purpose |
 |------|---------|
 | `src/plex_home/config.py` | Config loader — parses and validates the YAML config into typed dataclasses |
-| `src/plex_home/eligibility.py` | Group eligibility engine — evaluates date/time constraints and applies include/exclude/min-items filters |
+| `src/plex_home/eligibility.py` | Group eligibility engine — evaluates date/time constraints and applies include/exclude/min-items filters (collection filters use `matching.title_matches`) |
+| `src/plex_home/matching.py` | Title-spec matching — parses the `glob:`/`re:` sigil, expands `{YEAR}`/`{MONTH}`/`{WEEK}`/`{DAY}` variables, and whole-title matches (exact / `fnmatchcase` / `re.fullmatch`) |
 | `src/plex_home/plex_client.py` | Plex data-access layer — connects to PlexServer, fetches collections per library as CollectionInfo objects |
 | `src/plex_home/history.py` | Repeat-block history — tracks pinned collections with timestamps, answers "is this blocked?" |
 | `src/plex_home/resolver.py` | Slot resolver — walks configured home slots, resolves fixed + pick slots (sequential group priority), dedups across slots |
@@ -157,6 +167,7 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 | `tests/test_config.py` | Pytest suite for config loader (run with `.venv/bin/pytest`) |
 | `tests/test_history.py` | Pytest suite for repeat-block history |
 | `tests/test_eligibility.py` | Pytest suite for group eligibility engine |
+| `tests/test_matching.py` | Pytest suite for title-spec matching (sigils, variables, exact/glob/regex) |
 | `tests/test_plex_client.py` | Pytest suite for Plex client (fully mocked) |
 | `tests/test_resolver.py` | Pytest suite for slot resolver |
 | `tests/test_managed_hubs.py` | Pytest suite for the shared managed-hub primitives (fully mocked) |

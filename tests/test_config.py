@@ -290,3 +290,67 @@ def test_history_path_ignores_the_working_directory(tmp_path, monkeypatch):
     config = load_config(str(cfg))
 
     assert config.history_path.parent == tmp_path.resolve()
+
+
+# --- variable expansion + pattern validation (issue #2) ---
+
+def test_year_variable_expands_at_load():
+    from datetime import datetime, timezone
+    year = datetime.now(timezone.utc).strftime("%Y")
+    data = merge(BASE, {"home": {"Movies": [{"collection": "Oscars Death Race {YEAR}"}]}})
+    path = write_yaml(data)
+    try:
+        cfg = load_config(path)
+        assert cfg.home["Movies"][0].collection == f"Oscars Death Race {year}"
+    finally:
+        os.unlink(path)
+
+
+def test_year_variable_expands_in_group_collections():
+    from datetime import datetime, timezone
+    year = datetime.now(timezone.utc).strftime("%Y")
+    data = merge(BASE, {
+        "home": {"Movies": [{"collection": "Fixed"}]},
+        "groups": {"movies": {"include_collections": ["Best of {YEAR}"],
+                              "exclude_collections": ["Worst of {YEAR}"]}},
+    })
+    path = write_yaml(data)
+    try:
+        cfg = load_config(path)
+        g = cfg.groups["movies"]
+        assert g.include_collections == [f"Best of {year}"]
+        assert g.exclude_collections == [f"Worst of {year}"]
+    finally:
+        os.unlink(path)
+
+
+def test_sigil_and_variable_preserved_together():
+    from datetime import datetime, timezone
+    year = datetime.now(timezone.utc).strftime("%Y")
+    data = merge(BASE, {"home": {"Movies": [{"collection": "glob:Oscars {YEAR} *"}]}})
+    path = write_yaml(data)
+    try:
+        cfg = load_config(path)
+        assert cfg.home["Movies"][0].collection == f"glob:Oscars {year} *"
+    finally:
+        os.unlink(path)
+
+
+def test_invalid_regex_spec_raises_config_error():
+    data = merge(BASE, {"home": {"Movies": [{"collection": "re:Oscars ("}]}})
+    path = write_yaml(data)
+    try:
+        with pytest.raises(ConfigError, match="invalid regex"):
+            load_config(path)
+    finally:
+        os.unlink(path)
+
+
+def test_valid_regex_spec_loads():
+    data = merge(BASE, {"home": {"Movies": [{"collection": r"re:Oscars \d{4}"}]}})
+    path = write_yaml(data)
+    try:
+        cfg = load_config(path)
+        assert cfg.home["Movies"][0].collection == r"re:Oscars \d{4}"
+    finally:
+        os.unlink(path)

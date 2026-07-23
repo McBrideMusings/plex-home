@@ -189,3 +189,35 @@ def test_eligible_uses_correct_library():
     result = e.eligible_collections(g, "TV Shows", libs, global_min_items=0, now=dt(6, 1))
     assert len(result) == 1
     assert result[0].title == "Show A"
+
+
+# --- pattern include/exclude collections (issue #2) ---
+
+def test_include_glob_membership():
+    g = group(include_collections=["glob:Marvel *"])
+    assert e.matches_group_membership(g, coll("Marvel Movies"))
+    assert not e.matches_group_membership(g, coll("DC Movies"))
+
+
+def test_include_regex_membership():
+    g = group(include_collections=[r"re:Oscars Death Race \d{4}"])
+    assert e.matches_group_membership(g, coll("Oscars Death Race 2026"))
+    assert not e.matches_group_membership(g, coll("Oscars Death Race"))
+
+
+def test_include_exact_still_works():
+    g = group(include_collections=["Marvel Movies"])
+    assert e.matches_group_membership(g, coll("Marvel Movies"))
+    assert not e.matches_group_membership(g, coll("Marvel"))
+
+
+def test_exclude_glob_wins_over_include():
+    g = group(include_collections=["glob:Marvel *"], exclude_collections=["glob:* Trailers"])
+    assert e.matches_group_membership(g, coll("Marvel Movies"))
+    assert not e.matches_group_membership(g, coll("Marvel Trailers"))
+
+
+def test_exclude_regex_drops():
+    g = group(exclude_collections=[r"re:.* \(unfinished\)"])
+    assert not e.matches_group_membership(g, coll("Backlog (unfinished)"))
+    assert e.matches_group_membership(g, coll("Backlog"))

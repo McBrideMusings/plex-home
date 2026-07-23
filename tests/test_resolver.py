@@ -237,3 +237,32 @@ def test_multiple_fixed_and_pick_slots():
     assert result[1].title == "B"
     assert result[3].title == "C"
     assert result[2].title in {"Movie A", "Movie B", "Movie C"}
+
+
+# --- pattern fixed slots (issue #2) ---
+
+def test_fixed_glob_slot_picks_first_by_title_sort():
+    colls = {"Movies": [coll("Oscars Death Race 2027"), coll("Oscars Death Race 2026")]}
+    cfg = make_config([FixedSlot("glob:Oscars Death Race *")])
+    result = resolve_slots(cfg, colls, EMPTY_HISTORY, NOW)
+    assert titles(result) == ["Oscars Death Race 2026"]
+
+
+def test_fixed_regex_slot_matches():
+    colls = {"Movies": [coll("Oscars Death Race 2026"), coll("Comedy")]}
+    cfg = make_config([FixedSlot(r"re:Oscars Death Race \d{4}")])
+    result = resolve_slots(cfg, colls, EMPTY_HISTORY, NOW)
+    assert titles(result) == ["Oscars Death Race 2026"]
+
+
+def test_fixed_pattern_slot_skips_when_no_match():
+    colls = {"Movies": [coll("Comedy"), coll("Drama")]}
+    cfg = make_config([FixedSlot("glob:Oscars *")])
+    result = resolve_slots(cfg, colls, EMPTY_HISTORY, NOW)
+    assert result == []
+
+
+def test_fixed_exact_slot_still_blind_pins_without_collection_list():
+    cfg = make_config([FixedSlot("Recently Added")])
+    result = resolve_slots(cfg, {}, EMPTY_HISTORY, NOW)
+    assert titles(result) == ["Recently Added"]

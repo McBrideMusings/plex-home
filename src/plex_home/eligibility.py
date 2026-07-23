@@ -2,6 +2,7 @@ from __future__ import annotations
 from datetime import datetime, date, time
 from .config import Group
 from .plex_client import CollectionInfo
+from .matching import title_matches
 
 
 def is_group_eligible(group: Group, now: datetime) -> bool:
@@ -25,12 +26,12 @@ def matches_group_membership(group: Group, coll: CollectionInfo) -> bool:
     has_include = bool(group.include_labels or group.include_collections)
     if has_include:
         label_match = any(lbl in coll.labels for lbl in group.include_labels)
-        name_match = coll.title in group.include_collections
+        name_match = any(title_matches(spec, coll.title) for spec in group.include_collections)
         if not (label_match or name_match):
             return False
     if any(lbl in coll.labels for lbl in group.exclude_labels):
         return False
-    if coll.title in group.exclude_collections:
+    if any(title_matches(spec, coll.title) for spec in group.exclude_collections):
         return False
     return True
 
