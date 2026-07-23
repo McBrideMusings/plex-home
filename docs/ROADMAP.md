@@ -15,8 +15,8 @@
 ## Next
 
 - [x] Optional webhook notification on cycle completion
-- [ ] Dry-run / preview mode (log what would be pinned without touching Plex)
-- [ ] Config validation with human-readable errors (unknown group names, invalid date formats, etc.)
+- [x] Dry-run / preview mode (log what would be pinned without touching Plex) — the `simulate` subcommand
+- [x] Config validation with human-readable errors (unknown group names, invalid date formats, etc.) — `ConfigError` from `config.py`
 
 ## Later
 

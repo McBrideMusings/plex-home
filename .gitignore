@@ -19,5 +19,8 @@ venv/
 .env
 config.local.json
 
+# Mirror of the Unraid appdata dir — holds the live config with the Plex token
+deploy/
+
 # Ephemeral Claude scratch (plans, followups, summaries)
 tmp/

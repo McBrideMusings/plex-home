@@ -86,6 +86,43 @@ home:
 | `home` | Mapping of **library name → ordered list of slots**; each slot is `{collection: "<title>"}` (any managed hub by title — collection or system) or `{pick: [<group>, ...]}` (collections only). Every key must be one of `library_names`. |
 | `webhook_url` | Optional; POSTs a per-cycle summary of pinned titles |
 
+### Group filters — `include_*` and `exclude_*`
+
+A group's four filter keys decide which collections in a library it may pin. All four are lists of exact, case-sensitive strings — a label or a collection title, matched whole (no globs, no substrings).
+
+```yaml
+groups:
+  horror-not-slashers:
+    include_labels: [Horror, Thriller]        # in scope: carries EITHER label…
+    include_collections: [Giallo Essentials]  # …OR is this exact title
+    exclude_labels: [Christmas]               # …but never if it carries this label
+    exclude_collections: [Friday the 13th]    # …or is this exact title
+```
+
+How the four combine, in order:
+
+1. **Includes build the candidate set, as a union.** `include_labels` and `include_collections` are OR'd together — a collection is in scope if it carries **any** one of the listed labels **or** its title is in `include_collections`. Listing both keys widens the set; it does not narrow it.
+2. **Omitting both includes means "the whole library".** A group with no `include_labels` and no `include_collections` starts with every collection in the referencing `home` section's library.
+3. **Excludes are applied after, and always win.** A collection carrying **any** label in `exclude_labels`, or whose title is in `exclude_collections`, is dropped — even if an include named it explicitly. Use this to carve a hole in a broad include.
+4. **Min-items runs alongside.** Collections below `min_items_for_pinning` (group override, else `cadence`) are dropped regardless of the filters.
+
+```yaml
+groups:
+  # Everything in the library except the seasonal stuff and one problem collection.
+  everyday:
+    exclude_labels: [Halloween, Christmas]
+    exclude_collections: [Unsorted Imports]
+
+  # Broad label, minus a few titles that carry it but shouldn't rotate.
+  prestige:
+    include_labels: [Prestige]
+    exclude_collections: [Prestige - Test, Prestige - Duplicates]
+```
+
+**Filters apply to `pick` slots only.** A fixed slot (`- collection: "Trending Movies"`) pins its title outright — no label, exclude, or min-items check. Excluding a title in a group does not stop a fixed slot elsewhere in the config from pinning it.
+
+**Labels are Plex collection labels, not genres.** They are read off the collection object itself (`collection.labels` via plexapi), not from the genres or labels of the items inside it. A collection full of horror movies matches `include_labels: [Horror]` only if the *collection* is labelled `Horror`.
+
 **Home order is per-library, not global.** Plex renders promoted collections grouped by library, and exposes no way to reorder the library blocks themselves (that's your account's pinned-source order, set by hand in Plex). So the list under each `home` library sets the order *within that library's block only*; you cannot lift a TV collection above a Movies one. See [ADR-0006](docs/adr/0006-per-library-home-mapping.md).
 
 > Never share your Plex token. Keep real credentials out of committed files.
