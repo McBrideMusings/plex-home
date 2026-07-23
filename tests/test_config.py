@@ -262,3 +262,31 @@ def test_no_plex_connection_during_load():
         assert cfg.plex_url == "http://0.0.0.0:99999"
     finally:
         os.unlink(path)
+
+
+def test_history_path_sits_beside_the_config_file(tmp_path):
+    """The pin history follows the config, not the working directory.
+
+    A container mounts one directory holding both files; if the history were
+    resolved against the process cwd instead, a WORKDIR change would silently
+    start discarding the repeat-block state on every container recreate.
+    """
+    cfg = tmp_path / "appdata" / "config.yaml"
+    cfg.parent.mkdir()
+    cfg.write_text(yaml.dump(BASE), encoding="utf-8")
+
+    config = load_config(str(cfg))
+
+    assert config.history_path == tmp_path.resolve() / "appdata" / "pin_history.json"
+
+
+def test_history_path_ignores_the_working_directory(tmp_path, monkeypatch):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.dump(BASE), encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    config = load_config(str(cfg))
+
+    assert config.history_path.parent == tmp_path.resolve()

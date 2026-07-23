@@ -4,24 +4,28 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-HISTORY_FILE = Path("pin_history.json")
 _TIMESTAMP_FMT = "%Y-%m-%dT%H:%M:%S"
 
 log = logging.getLogger(__name__)
 
 
-def load_history() -> dict[tuple[str, str], datetime]:
+def load_history(path: Path) -> dict[tuple[str, str], datetime]:
     """Load the repeat-block history keyed by ``(library, title)``.
+
+    ``path`` is passed in rather than derived from the working directory —
+    ``Config.history_path`` puts it beside the config file. Nothing about where
+    the process happens to be running should decide whether the pin history
+    survives.
 
     On-disk format is nested by library: ``{library: {title: timestamp}}``.
     A legacy flat ``{title: timestamp}`` file (values are strings, not maps)
     fails the per-library shape check and is skipped — the history is disposable
     runtime state ("delete to reset"), so an old file just starts fresh.
     """
-    if not HISTORY_FILE.exists():
+    if not path.exists():
         return {}
     try:
-        raw = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             raise ValueError("expected a JSON object")
         result: dict[tuple[str, str], datetime] = {}
@@ -40,11 +44,11 @@ def load_history() -> dict[tuple[str, str], datetime]:
         return {}
 
 
-def save_history(history: dict[tuple[str, str], datetime]) -> None:
+def save_history(history: dict[tuple[str, str], datetime], path: Path) -> None:
     nested: dict[str, dict[str, str]] = {}
     for (library, title), dt in history.items():
         nested.setdefault(library, {})[title] = dt.strftime(_TIMESTAMP_FMT)
-    HISTORY_FILE.write_text(json.dumps(nested, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(nested, indent=2), encoding="utf-8")
 
 
 def is_blocked(

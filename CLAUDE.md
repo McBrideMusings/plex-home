@@ -81,6 +81,15 @@ A mapping of group name → group definition. Each group scopes a set of collect
 | `repeat_block_hours` | inherits `cadence` | Per-group override of the recency block |
 | `min_items_for_pinning` | inherits `cadence` | Per-group override of the min-items threshold |
 
+**How the four filter keys combine** (`eligibility.py:matches_group_membership`). All four are lists of exact, case-sensitive strings — no globs, no substrings.
+
+1. The two `include_*` keys are **OR'd**, not AND'd: a collection is in scope if it carries **any** listed label **or** its title is in `include_collections`. Listing both widens the candidate set.
+2. Omitting both includes means **the whole library** the referencing `home` section names.
+3. `exclude_*` applies after, and **always wins** — an excluded label or title is dropped even when an include named it explicitly.
+4. Min-items is applied alongside, from the group override or `cadence`.
+
+Filters are a **pick-slot concept only**. A fixed slot pins its title with no label, exclude, or min-items check, so excluding a title in a group does not stop a fixed slot elsewhere from pinning it. Labels are read off the collection object (`collection.labels`), not from the genres or labels of the items inside it.
+
 ### `home` slots
 
 A mapping of **library name → ordered list of slots**. Every key must be one of `library_names`, or the config fails to load. Within a library, the list order is the home-screen order its pinned hubs are moved into. Each slot is exactly one of:
@@ -162,12 +171,12 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 | `config.yaml` | Runtime YAML config (path overridable via the global `--config` flag) — user-provided, not committed with real credentials |
 | `requirements.txt` | Runtime deps for `pip install -r` (`plexapi`, `requests`, `pyyaml`); mirrors the `dependencies` in `pyproject.toml` |
 | `Dockerfile` | Container build (`python:3.12-slim-bullseye`) — `pip install .` then `CMD ["plex-home", "run"]` |
-| `pin_history.json` | Auto-generated at runtime by `history.py`; nested `{library: {title: last-pinned UTC timestamp}}` for recency blocking, keyed per-library so same-titled collections in different libraries block independently. Delete to reset |
+| `pin_history.json` | Auto-generated at runtime by `history.py`, **beside the config file** (`Config.history_path`, set by `load_config`); nested `{library: {title: last-pinned UTC timestamp}}` for recency blocking, keyed per-library so same-titled collections in different libraries block independently. Delete to reset |
 
 ## Gotchas
 
 - **Logging is stdout-only** — `main.py` calls `logging.basicConfig` with no file handler, so there is no log file to rotate or truncate. Under Docker, read logs via `docker logs`.
-- **`pin_history.json` is mutable state** — `history.py` rewrites it each cycle (nested `{library: {title: last-pinned UTC timestamp}}`, keyed per-library). Delete it to reset the recency-block history; a missing, corrupt, or legacy flat-format file is handled gracefully (starts fresh).
+- **`pin_history.json` is mutable state, and it lives beside the config** — `history.py` rewrites it each cycle (nested `{library: {title: last-pinned UTC timestamp}}`, keyed per-library). Its path comes from `Config.history_path`, which `load_config` sets to the config file's own directory — *not* the process working directory, so where the daemon is launched from can't decide whether the history survives. `load_history`/`save_history` take the path as an argument; there is no module-level default. Delete the file to reset; a missing, corrupt, or legacy flat-format file is handled gracefully (starts fresh).
 - **Tests need `src/` on the path** — `pyproject.toml` sets `pythonpath = ["src"]`, so `.venv/bin/pytest` imports `plex_home` without an install. Running pytest a different way (or importing the modules directly) requires `pip install -e .` or `PYTHONPATH=src` first.
 - **Config errors don't crash the daemon** — `config.py` raises `ConfigError` on any invalid or missing field; `main.py` catches it, logs the message, and retries in 5 minutes (`CONFIG_ERROR_RETRY_MINUTES`) instead of exiting.
 - **Same-titled collections in one library collide** — everything keys by `(library, title)`, so two collections with an identical title in the same library are indistinguishable: `managed_hubs.title_map` keeps one and the sweep un-manages the other (ADR-0007). Give collections distinct titles within a library. A collection and a *system* hub sharing a title is fine — the collection wins.

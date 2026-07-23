@@ -54,8 +54,9 @@ def test_run_cycle_wires_pipeline_in_order():
     assert result == resolved
     m["resolve"].assert_called_once()
     m["apply_pins"].assert_called_once()
-    # history saved from the pin engine's returned history
-    m["save_history"].assert_called_once_with(pin_result.history)
+    # history saved from the pin engine's returned history, to the path the
+    # config resolved (beside the config file, never the working directory)
+    m["save_history"].assert_called_once_with(pin_result.history, config.history_path)
     m["apply_order"].assert_called_once()
     m["webhook"].assert_called_once()
     assert m["webhook"].call_args.args[0] == "http://hook"

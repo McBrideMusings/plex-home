@@ -1,0 +1,44 @@
+# Copy to config.yaml and fill in. Never commit a filled-in copy — plex_token
+# is a credential. pin_history.json is written beside this file at runtime.
+
+plex_url: http://<plex-host>:32400
+plex_token: <your-plex-token>
+library_names: [Movies, TV Shows]
+
+cadence:
+  interval_minutes: 180        # minutes between cycles
+  repeat_block_hours: 12       # hours a pinned collection can't be re-pinned
+  min_items_for_pinning: 10    # skip collections smaller than this
+  mirror_recommended: false    # also force pins into Library Recommended
+
+# webhook_url: https://example.com/hook   # optional per-cycle summary POST
+
+groups:
+  # Seasonal: only eligible inside the date window.
+  halloween:
+    date: 10-01/10-31
+    include_labels: [Horror]
+
+  # Explicit titles, no labels needed.
+  staff-picks:
+    include_collections: [A24, Studio Ghibli]
+
+  # Broad label minus a few carve-outs. Excludes always win over includes.
+  prestige:
+    include_labels: [Prestige]
+    exclude_collections: [Prestige - Test]
+
+  # No include keys at all = the whole library, minus the exclusions.
+  everything-else:
+    exclude_labels: [Halloween, Christmas]
+    repeat_block_hours: 48     # per-group override of the cadence default
+
+home:
+  Movies:
+    - collection: Recently Added Movies   # fixed slot — a system hub by title
+    - collection: Trending Movies         # fixed slot — a collection by title
+    - pick: [halloween, staff-picks]      # first eligible group wins
+    - pick: [everything-else]
+  TV Shows:
+    - collection: Trending TV
+    - pick: [prestige]

@@ -32,7 +32,7 @@ def run_cycle(config: Config) -> list[ResolvedPin]:
     """
     plex = connect(config.plex_url, config.plex_token)
     all_collections = fetch_collections(plex, config.library_names)
-    history = load_history()
+    history = load_history(config.history_path)
     now = datetime.now(tz=timezone.utc)
 
     resolved = resolve_slots(config, all_collections, history, now)
@@ -46,7 +46,7 @@ def run_cycle(config: Config) -> list[ResolvedPin]:
         plex, config.library_names, resolved, history,
         mirror_recommended=config.cadence.mirror_recommended,
     )
-    save_history(pin_result.history)
+    save_history(pin_result.history, config.history_path)
 
     apply_order(plex, config.library_names, resolved)
 

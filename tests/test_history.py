@@ -37,48 +37,42 @@ def test_block_is_per_library():
     assert h.is_blocked("TV Shows", "Featured", hist, repeat_block_hours=24) is False
 
 
-def test_load_missing_file(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    result = h.load_history()
+def test_load_missing_file(tmp_path):
+    result = h.load_history(tmp_path / "pin_history.json")
     assert result == {}
 
 
-def test_load_corrupt_file(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_load_corrupt_file(tmp_path):
     (tmp_path / "pin_history.json").write_text("not json", encoding="utf-8")
-    result = h.load_history()
+    result = h.load_history(tmp_path / "pin_history.json")
     assert result == {}
 
 
-def test_load_wrong_type(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_load_wrong_type(tmp_path):
     (tmp_path / "pin_history.json").write_text("[]", encoding="utf-8")
-    result = h.load_history()
+    result = h.load_history(tmp_path / "pin_history.json")
     assert result == {}
 
 
-def test_load_legacy_flat_file_ignored(tmp_path, monkeypatch):
+def test_load_legacy_flat_file_ignored(tmp_path):
     # old flat {title: timestamp} shape has string values, not per-library maps
-    monkeypatch.chdir(tmp_path)
     (tmp_path / "pin_history.json").write_text(
         json.dumps({"Movie A": "2026-01-01T12:00:00"}), encoding="utf-8"
     )
-    result = h.load_history()
+    result = h.load_history(tmp_path / "pin_history.json")
     assert result == {}
 
 
-def test_save_and_reload(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_save_and_reload(tmp_path):
     hist = {("Movies", "Movie A"): datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)}
-    h.save_history(hist)
-    reloaded = h.load_history()
+    h.save_history(hist, tmp_path / "pin_history.json")
+    reloaded = h.load_history(tmp_path / "pin_history.json")
     assert reloaded[("Movies", "Movie A")] == datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
 
-def test_save_nested_by_library(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_save_nested_by_library(tmp_path):
     dt = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
-    h.save_history({("Movies", "Featured"): dt, ("TV Shows", "Featured"): dt})
+    h.save_history({("Movies", "Featured"): dt, ("TV Shows", "Featured"): dt}, tmp_path / "pin_history.json")
     raw = json.loads((tmp_path / "pin_history.json").read_text(encoding="utf-8"))
     assert raw == {
         "Movies": {"Featured": "2026-01-01T12:00:00"},
@@ -86,23 +80,21 @@ def test_save_nested_by_library(tmp_path, monkeypatch):
     }
 
 
-def test_save_creates_file(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_save_creates_file(tmp_path):
     assert not (tmp_path / "pin_history.json").exists()
-    h.save_history({("Movies", "X"): datetime.now(tz=timezone.utc)})
+    h.save_history({("Movies", "X"): datetime.now(tz=timezone.utc)}, tmp_path / "pin_history.json")
     assert (tmp_path / "pin_history.json").exists()
 
 
-def test_save_preserves_unrelated_entries(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_save_preserves_unrelated_entries(tmp_path):
     hist = {
         ("Movies", "Movie A"): datetime(2026, 1, 1, tzinfo=timezone.utc),
         ("Movies", "Movie B"): datetime(2026, 1, 2, tzinfo=timezone.utc),
     }
-    h.save_history(hist)
-    updated = h.record_pins([("Movies", "Movie C")], h.load_history())
-    h.save_history(updated)
-    final = h.load_history()
+    h.save_history(hist, tmp_path / "pin_history.json")
+    updated = h.record_pins([("Movies", "Movie C")], h.load_history(tmp_path / "pin_history.json"))
+    h.save_history(updated, tmp_path / "pin_history.json")
+    final = h.load_history(tmp_path / "pin_history.json")
     assert ("Movies", "Movie A") in final
     assert ("Movies", "Movie B") in final
     assert ("Movies", "Movie C") in final

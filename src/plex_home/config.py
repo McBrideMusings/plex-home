@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional, Union
 import re
 import yaml
@@ -62,6 +63,12 @@ class Config:
     home: dict[str, list[Slot]]
     groups: dict[str, Group]
     webhook_url: Optional[str] = None
+    #: Where the repeat-block history is read and written. Set by
+    #: ``load_config`` to ``pin_history.json`` beside the config file, so the
+    #: two files that describe one deployment travel together. Deriving it from
+    #: the config path rather than the process working directory is what lets a
+    #: container mount one directory and keep its history across recreates.
+    history_path: Path = Path("pin_history.json")
 
 
 def load_config(path: str) -> Config:
@@ -95,6 +102,7 @@ def load_config(path: str) -> Config:
         home=home,
         groups=groups,
         webhook_url=webhook_url,
+        history_path=Path(path).resolve().parent / "pin_history.json",
     )
 
 
