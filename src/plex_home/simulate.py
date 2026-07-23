@@ -16,11 +16,12 @@ verify the two time-based behaviours:
     by design and are reported as such, not flagged).
 """
 from __future__ import annotations
+import copy
 import random
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from .config import Config
+from .config import Config, expand_templates
 from .plex_client import CollectionInfo
 from .resolver import resolve_slots
 
@@ -55,7 +56,14 @@ def run_simulation(
     start: str | None = None,
     seed: int = 0,
 ) -> str:
-    """Simulate ``days`` of cycles and return a text report. Performs no I/O."""
+    """Simulate ``days`` of cycles and return a text report. Performs no I/O.
+
+    ``config`` is expected to hold **raw** (unexpanded) title specs — the caller
+    loads it with ``load_config(..., expand=False)`` — so ``{YEAR}``-style
+    variables can be re-expanded against the *simulated* clock each cycle rather
+    than baked to wall-clock time at load. A config with no templates is
+    unaffected (expansion is a no-op).
+    """
     interval = config.cadence.interval_minutes
     now = _parse_start(start)
     cycles = max(1, int(days * 24 * 60 / interval))
@@ -70,7 +78,12 @@ def run_simulation(
 
     for cycle in range(cycles):
         trace: list[dict] = []
-        resolved = resolve_slots(config, all_collections, history, now, rng, trace=trace)
+        # Re-expand {YEAR}/{MONTH}/{WEEK}/{DAY} at the simulated time, so a dated
+        # simulation resolves titles for the year it is pretending to be. The copy
+        # keeps the raw specs intact for the next cycle.
+        cfg_cycle = copy.deepcopy(config)
+        expand_templates(cfg_cycle.home, cfg_cycle.groups, now)
+        resolved = resolve_slots(cfg_cycle, all_collections, history, now, rng, trace=trace)
 
         by_library: dict[str, list[str]] = {lib: [] for lib in config.home}
         empties: list[str] = []

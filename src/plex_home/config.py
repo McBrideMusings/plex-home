@@ -74,7 +74,7 @@ class Config:
     history_path: Path = Path("pin_history.json")
 
 
-def load_config(path: str) -> Config:
+def load_config(path: str, expand: bool = True) -> Config:
     try:
         with open(path, "r", encoding="utf-8") as f:
             raw = yaml.safe_load(f)
@@ -97,7 +97,8 @@ def load_config(path: str) -> Config:
     groups = _parse_groups(raw["groups"])
     home = _parse_home(raw["home"], groups, library_names)
 
-    _expand_templates(home, groups, datetime.now(timezone.utc))
+    if expand:
+        expand_templates(home, groups, datetime.now(timezone.utc))
 
     return Config(
         plex_url=plex_url,
@@ -111,16 +112,19 @@ def load_config(path: str) -> Config:
     )
 
 
-def _expand_templates(
+def expand_templates(
     home: dict[str, list[Slot]], groups: dict[str, Group], now: datetime
 ) -> None:
     """Expand ``{YEAR}``-style variables in every collection-title spec in place.
 
-    Runs once at load; since the daemon reloads config each cycle, this re-resolves
-    the current year/month/week/day for free. Also validates that any ``re:`` spec
-    compiles, so a bad regex fails fast with a ``ConfigError`` at load rather than
-    mid-cycle. Only the three title-bearing fields are templated — fixed-slot
-    collections and group include/exclude collection lists — never labels.
+    ``load_config`` runs this once at load (against wall-clock ``now``); since the
+    daemon reloads config each cycle, that re-resolves the current
+    year/month/week/day for free. ``simulate`` instead loads config raw
+    (``expand=False``) and calls this per cycle against its simulated clock, so a
+    dated simulation renders the year it is pretending to be. Also validates that
+    any ``re:`` spec compiles, so a bad regex fails fast with a ``ConfigError``.
+    Only the three title-bearing fields are templated — fixed-slot collections and
+    group include/exclude collection lists — never labels.
     """
     def _expand(spec: str, loc: str) -> str:
         expanded = matching.expand_variables(spec, now)

@@ -13,7 +13,7 @@ from plexapi.server import PlexServer
 
 from . import hubs
 from . import simulate
-from .config import Config
+from .config import Config, load_config
 from .hubs import HubError
 from .plex_client import fetch_collections
 
@@ -173,9 +173,13 @@ def cmd_move(plex: PlexServer, config: Config, args) -> int:
 
 def cmd_simulate(plex: PlexServer, config: Config, args) -> int:
     all_collections = fetch_collections(plex, config.library_names)
+    # Reload raw (unexpanded) so the simulator can re-expand {YEAR}-style variables
+    # at each simulated cycle instead of at wall-clock load time. The initial load
+    # in main._run_command already validated the config (including any re: pattern).
+    raw_config = load_config(args.config, expand=False)
     try:
         report = simulate.run_simulation(
-            config, all_collections, days=args.days, start=args.start, seed=args.seed
+            raw_config, all_collections, days=args.days, start=args.start, seed=args.seed
         )
     except ValueError as e:
         raise HubError(str(e))

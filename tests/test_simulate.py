@@ -89,3 +89,19 @@ def test_date_window_start_activates_seasonal_group():
     report = run_simulation(cfg, colls, days=1, start="2026-10-05", seed=0)
     assert "Movies / Spooky" in report
     assert "empty pick" not in report
+
+
+def test_year_variable_tracks_simulated_clock():
+    # {YEAR} must resolve to the *simulated* year, not wall-clock (issue #2 fix 1).
+    cfg = make_config({"Movies": [FixedSlot("Oscars {YEAR}")]}, interval=1440)
+    report = run_simulation(cfg, {}, days=1, start="2030-06-15", seed=0)
+    assert "Oscars 2030" in report
+    assert "Oscars 2026" not in report
+
+
+def test_year_variable_changes_across_a_year_boundary():
+    # Re-expanding each cycle means the title tracks the clock as it crosses years.
+    cfg = make_config({"Movies": [FixedSlot("Oscars {YEAR}")]}, interval=1440)
+    report = run_simulation(cfg, {}, days=10, start="2030-12-28", seed=0)
+    assert "Oscars 2030" in report
+    assert "Oscars 2031" in report
