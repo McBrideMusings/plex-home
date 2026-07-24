@@ -24,3 +24,4 @@ deploy/
 
 # Ephemeral Claude scratch (plans, followups, summaries)
 tmp/
+*.local.*
