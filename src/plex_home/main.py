@@ -10,6 +10,7 @@ from .config import load_config, ConfigError, Config
 from .plex_client import connect, fetch_collections
 from .hubs import HubError
 from .history import load_history, save_history
+from .locking import cycle_lock
 from .resolver import resolve_slots, ResolvedPin
 from .pinning import apply_pins
 from .ordering import apply_order
@@ -30,7 +31,15 @@ def run_cycle(config: Config) -> list[ResolvedPin]:
     Connects to Plex, fetches collections, resolves the configured slots, applies
     the pin/unpin engine, enforces hub ordering, and fires the webhook if one is
     configured. Persists the updated repeat-block history.
+
+    Held under a cross-process lock for its whole duration, because ``once`` runs
+    this in a second process against the same history file (see ``locking``).
     """
+    with cycle_lock(config.lock_path):
+        return _run_cycle_locked(config)
+
+
+def _run_cycle_locked(config: Config) -> list[ResolvedPin]:
     plex = connect(config.plex_url, config.plex_token)
     all_collections = fetch_collections(plex, config.library_names)
     history = load_history(config.history_path)

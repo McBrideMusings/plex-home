@@ -82,6 +82,11 @@ class Config:
     #: the config path rather than the process working directory is what lets a
     #: container mount one directory and keep its history across recreates.
     history_path: Path = Path("pin_history.json")
+    #: Lock file guarding a whole cycle, so a forced ``once`` refresh and the
+    #: daemon can't interleave their read-modify-write of the history. Beside the
+    #: config for the same reason ``history_path`` is: one mounted directory
+    #: holds everything one deployment owns.
+    lock_path: Path = Path(".plex-home.lock")
 
 
 def load_config(path: str, expand: bool = True) -> Config:
@@ -121,6 +126,7 @@ def load_config(path: str, expand: bool = True) -> Config:
         groups=groups,
         webhook_url=webhook_url,
         history_path=Path(path).resolve().parent / "pin_history.json",
+        lock_path=Path(path).resolve().parent / ".plex-home.lock",
     )
 
 

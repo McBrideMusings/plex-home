@@ -1,6 +1,8 @@
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 from zoneinfo import ZoneInfo
+import tempfile
 import pytest
 
 from plex_home import main
@@ -27,6 +29,10 @@ def make_config(webhook_url=None, interval=30):
     # A real tzinfo, not a mock: run_cycle and the scheduler both build a
     # datetime from it, which rejects anything that isn't a tzinfo subclass.
     cfg.cadence.timezone = NY
+    # A real path, not a mock: run_cycle locks this file, and open() reads an
+    # object answering __index__ (which MagicMock does) as a file descriptor —
+    # a mock here silently locks and closes stdout instead.
+    cfg.lock_path = Path(tempfile.mkdtemp()) / ".plex-home.lock"
     return cfg
 
 

@@ -22,7 +22,7 @@ Cycles fire on wall-clock boundaries — the multiples of `interval_minutes` mea
 plex-home once [--config config.yaml]
 docker exec <container> plex-home once
 ```
-Runs exactly one reconcile (same `run_cycle` the daemon calls) and exits. Intended for pushing an edited config live immediately instead of waiting out the interval. It is a **separate short-lived process**: it reads and writes the same `pin_history.json`, so the forced pins are visible to the daemon's next cycle, but the daemon's own sleep is untouched and the fixed daily schedule keeps its phase. Restarting the container also forces a cycle, but resets the schedule's phase to the restart moment — `once` is the one that doesn't. Exit codes: `0` reconciled, `1` the cycle failed, `2` the config wouldn't load.
+Runs exactly one reconcile (same `run_cycle` the daemon calls) and exits. Intended for pushing an edited config live immediately instead of waiting out the interval. It is a **separate short-lived process**: it reads and writes the same `pin_history.json`, so the forced pins are visible to the daemon's next cycle, but the daemon's own sleep is untouched and the fixed daily schedule keeps its phase. The two can't collide — `run_cycle` holds an exclusive lock on `Config.lock_path` (`.plex-home.lock`, beside the config) for its whole duration, so a `once` that arrives mid-cycle waits and then runs. Restarting the container also forces a cycle, but resets the schedule's phase to the restart moment — `once` is the one that doesn't. Exit codes: `0` reconciled, `1` the cycle failed, `2` the config wouldn't load.
 
 ### CLI — live home-screen control (ADR-0005)
 `list` / `pin` / `unpin` / `move` operate on the live Plex home screen **imperatively**, independent of the config. The home screen is treated as a per-library, indexed list of pinned hubs (system and collection hubs alike). A running daemon reconciles the home back to the config, so CLI changes are ephemeral against it.
@@ -167,6 +167,7 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 |------|---------|
 | `src/plex_home/config.py` | Config loader — parses and validates the YAML config into typed dataclasses |
 | `src/plex_home/eligibility.py` | Group eligibility engine — evaluates date/time constraints and applies include/exclude/min-items filters (collection filters use `matching.title_matches`). Compares against whatever clock the caller's `now` carries, which is `cadence.timezone` |
+| `src/plex_home/locking.py` | Cross-process cycle lock — an exclusive `flock` on `Config.lock_path` held for a whole `run_cycle`, so a forced `once` refresh and the daemon can't interleave their read-modify-write of the history. A second cycle waits rather than being dropped |
 | `src/plex_home/schedule.py` | Cycle scheduling — `next_boundary` (next multiple of `interval_minutes` from local midnight, computed on wall-clock fields so DST can't slide it) and `seconds_until` (the wait, converted through UTC). Shared by the daemon and `simulate` |
 | `src/plex_home/matching.py` | Title-spec matching — parses the `glob:`/`re:` sigil, expands `{YEAR}`/`{MONTH}`/`{WEEK}`/`{DAY}` variables, and whole-title matches (exact / `fnmatchcase` / `re.fullmatch`) |
 | `src/plex_home/plex_client.py` | Plex data-access layer — connects to PlexServer, fetches collections per library as CollectionInfo objects |
@@ -185,6 +186,7 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 | `tests/test_config.py` | Pytest suite for config loader (run with `.venv/bin/pytest`) |
 | `tests/test_history.py` | Pytest suite for repeat-block history |
 | `tests/test_eligibility.py` | Pytest suite for group eligibility engine |
+| `tests/test_locking.py` | Pytest suite for the cycle lock (real two-process mutual exclusion, release on exception, fd-coercion guard) |
 | `tests/test_schedule.py` | Pytest suite for wall-clock cycle scheduling (boundaries, day rollover, restart-independence, both DST transitions) |
 | `tests/test_matching.py` | Pytest suite for title-spec matching (sigils, variables, exact/glob/regex) |
 | `tests/test_plex_client.py` | Pytest suite for Plex client (fully mocked) |
