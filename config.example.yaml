@@ -6,7 +6,10 @@ plex_token: <your-plex-token>
 library_names: [Movies, TV Shows]
 
 cadence:
-  interval_minutes: 180        # minutes between cycles
+  interval_minutes: 180        # minutes between cycles; must divide 1440, since
+                               # cycles fire at fixed daily times (00:00, 03:00, …)
+  timezone: America/New_York   # clock for the cycle times AND every group date/time
+                               # window. An IANA name, never an abbreviation like EST
   repeat_block_hours: 12       # hours a pinned collection can't be re-pinned
   min_items_for_pinning: 10    # skip collections smaller than this
   mirror_recommended: false    # also force pins into Library Recommended

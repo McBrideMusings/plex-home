@@ -17,6 +17,8 @@
 - [x] Optional webhook notification on cycle completion
 - [x] Dry-run / preview mode (log what would be pinned without touching Plex) — the `simulate` subcommand
 - [x] Config validation with human-readable errors (unknown group names, invalid date formats, etc.) — `ConfigError` from `config.py`
+- [x] Fixed daily cycle times on a configured timezone, so the rotation lands at consistent hours and `time:` windows mean local — `cadence.timezone` + `schedule.py` (ADR-0008)
+- [x] Force a reconcile without restarting the container — the `once` subcommand (ADR-0008)
 
 ## Later
 

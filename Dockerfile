@@ -5,6 +5,10 @@ FROM python:3.12-slim-bullseye
 # Set environment variables
 # Ensures print statements and logs are sent straight to the terminal without buffering
 ENV PYTHONUNBUFFERED=1
+# Only affects the timestamps logging prints, so `docker logs` reads in local time.
+# The schedule and every group date/time window come from cadence.timezone in the
+# config, not from this — the zone data itself arrives via the tzdata dependency.
+ENV TZ=America/New_York
 
 # Set the working directory in the container
 WORKDIR /app

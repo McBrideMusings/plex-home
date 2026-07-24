@@ -105,3 +105,32 @@ def test_year_variable_changes_across_a_year_boundary():
     report = run_simulation(cfg, {}, days=10, start="2030-12-28", seed=0)
     assert "Oscars 2030" in report
     assert "Oscars 2031" in report
+
+
+def test_timeline_lands_on_fixed_daily_boundaries():
+    """Simulated cycles use the daemon's wall-clock times, not start + n*interval."""
+    cfg = make_config({"Movies": [FixedSlot("Recently Added")]}, interval=180)
+    # An off-boundary start snaps forward to 12:00, then walks the 3h grid.
+    report = run_simulation(cfg, {}, days=1, start="2026-06-15T10:22", seed=0)
+    assert "2026-06-15 12:00 EDT" in report
+    assert "2026-06-15 15:00 EDT" in report
+    assert "2026-06-15 10:22" not in report
+
+
+def test_timeline_holds_the_clock_across_a_dst_change():
+    """Spring forward must not slide every later cycle an hour off the schedule."""
+    cfg = make_config({"Movies": [FixedSlot("Recently Added")]}, interval=180)
+    report = run_simulation(cfg, {}, days=2, start="2026-03-07T23:00", seed=0)
+    # DST starts at 02:00 on the 8th, so the day straddles both offsets...
+    assert "2026-03-08 00:00 EST" in report
+    assert "2026-03-08 03:00 EDT" in report
+    # ...and the day after still fires on the same clock times, an hour of
+    # absolute time notwithstanding.
+    assert "2026-03-09 00:00 EDT" in report
+    assert "2026-03-09 06:00 EDT" in report
+
+
+def test_report_names_the_configured_timezone():
+    cfg = make_config({"Movies": [FixedSlot("Recently Added")]}, interval=180)
+    report = run_simulation(cfg, {}, days=1, start="2026-06-15", seed=0)
+    assert "Timezone           : America/New_York" in report

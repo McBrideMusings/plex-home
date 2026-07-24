@@ -2,9 +2,10 @@ from __future__ import annotations
 import logging
 import signal
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 
 from . import cli
+from . import schedule
 from .config import load_config, ConfigError, Config
 from .plex_client import connect, fetch_collections
 from .hubs import HubError
@@ -33,7 +34,9 @@ def run_cycle(config: Config) -> list[ResolvedPin]:
     plex = connect(config.plex_url, config.plex_token)
     all_collections = fetch_collections(plex, config.library_names)
     history = load_history(config.history_path)
-    now = datetime.now(tz=timezone.utc)
+    # Local wall clock, so a group's date/time window means what it says on the
+    # server's own clock. History timestamps stay UTC underneath.
+    now = datetime.now(tz=config.cadence.timezone)
 
     resolved = resolve_slots(config, all_collections, history, now)
     log.info(
@@ -62,12 +65,35 @@ def _handle_sigint(signum, frame) -> None:
     log.info("SIGINT received — shutting down after the current sleep.")
 
 
-def _interruptible_sleep(minutes: float) -> None:
-    """Sleep for ``minutes``, waking early (within ~1s) if a shutdown is requested."""
-    for _ in range(int(minutes * 60)):
+def _interruptible_sleep(seconds: float) -> None:
+    """Sleep for ``seconds``, waking early (within ~1s) if a shutdown is requested."""
+    for _ in range(int(seconds)):
         if not _running:
             return
         time.sleep(1)
+
+
+def run_once(config_path: str) -> int:
+    """Reconcile the home screen once and exit — the ``once`` subcommand.
+
+    Deliberately a separate short-lived process from the daemon: it reads and
+    writes the same ``pin_history.json``, so a forced refresh is visible to the
+    daemon's next cycle, but it does not touch the daemon's sleep. The fixed
+    daily schedule therefore keeps its phase across as many manual refreshes as
+    you like — that is the whole point of having this instead of a restart.
+    """
+    try:
+        config = load_config(config_path)
+    except ConfigError as e:
+        log.error("Config error: %s", e)
+        return 2
+    try:
+        resolved = run_cycle(config)
+    except Exception as e:
+        log.error("Cycle failed: %s", e)
+        return 1
+    log.info("Cycle complete — %d collection(s) pinned", len(resolved))
+    return 0
 
 
 def run_daemon(config_path: str) -> int:
@@ -81,7 +107,7 @@ def run_daemon(config_path: str) -> int:
             config = load_config(config_path)
         except ConfigError as e:
             log.error("Config error: %s — retrying in %d min", e, CONFIG_ERROR_RETRY_MINUTES)
-            _interruptible_sleep(CONFIG_ERROR_RETRY_MINUTES)
+            _interruptible_sleep(CONFIG_ERROR_RETRY_MINUTES * 60)
             continue
 
         try:
@@ -90,7 +116,13 @@ def run_daemon(config_path: str) -> int:
         except Exception as e:
             log.error("Cycle failed: %s — retrying next cycle", e)
 
-        _interruptible_sleep(config.cadence.interval_minutes)
+        # Sleep to the next fixed time of day rather than "interval from now", so
+        # the rotation lands at the same clock times regardless of when this
+        # process started or was last restarted.
+        now = datetime.now(tz=config.cadence.timezone)
+        target = schedule.next_boundary(now, config.cadence.interval_minutes)
+        log.info("Next cycle at %s", target.strftime("%Y-%m-%d %H:%M %Z"))
+        _interruptible_sleep(schedule.seconds_until(target, now))
 
     log.info("Plex Home stopped cleanly.")
     return 0
@@ -123,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
     args = cli.build_parser().parse_args(argv)
     if args.command == "run":
         return run_daemon(args.config)
+    if args.command == "once":
+        return run_once(args.config)
     return _run_command(args)
 
 

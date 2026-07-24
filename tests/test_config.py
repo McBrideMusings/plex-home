@@ -192,6 +192,65 @@ def test_valid_time_range_accepted():
         os.unlink(path)
 
 
+def test_timezone_defaults_to_new_york():
+    path = write_yaml(BASE)
+    try:
+        assert str(load_config(path).cadence.timezone) == "America/New_York"
+    finally:
+        os.unlink(path)
+
+
+def test_timezone_parsed_from_config():
+    data = merge(BASE, {"cadence": {"interval_minutes": 60, "timezone": "Europe/Berlin"}})
+    path = write_yaml(data)
+    try:
+        assert str(load_config(path).cadence.timezone) == "Europe/Berlin"
+    finally:
+        os.unlink(path)
+
+
+def test_unknown_timezone_raises():
+    data = merge(BASE, {"cadence": {"interval_minutes": 60, "timezone": "Middle/Earth"}})
+    path = write_yaml(data)
+    try:
+        with pytest.raises(ConfigError, match="timezone"):
+            load_config(path)
+    finally:
+        os.unlink(path)
+
+
+def test_non_string_timezone_raises():
+    data = merge(BASE, {"cadence": {"interval_minutes": 60, "timezone": 5}})
+    path = write_yaml(data)
+    try:
+        with pytest.raises(ConfigError, match="timezone"):
+            load_config(path)
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.parametrize("interval", [1, 15, 60, 180, 720, 1440])
+def test_interval_dividing_a_day_is_accepted(interval):
+    data = merge(BASE, {"cadence": {"interval_minutes": interval}})
+    path = write_yaml(data)
+    try:
+        assert load_config(path).cadence.interval_minutes == interval
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.parametrize("interval", [50, 100, 179, 1441])
+def test_interval_not_dividing_a_day_raises(interval):
+    """Cycles fire on fixed daily times, so a ragged last slot must be rejected up front."""
+    data = merge(BASE, {"cadence": {"interval_minutes": interval}})
+    path = write_yaml(data)
+    try:
+        with pytest.raises(ConfigError, match="interval_minutes"):
+            load_config(path)
+    finally:
+        os.unlink(path)
+
+
 def test_negative_repeat_block_hours_raises():
     data = merge(BASE, {"cadence": {"interval_minutes": 60, "repeat_block_hours": -1}})
     path = write_yaml(data)

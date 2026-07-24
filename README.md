@@ -28,7 +28,18 @@ This registers the `plex-home` console command. Without installing, the equivale
 plex-home run [--config config.yaml]
 ```
 
-`run` reloads the config at the start of every cycle (edits take effect without a restart), reconciles the home screen to the config, then sleeps `interval_minutes`. It runs forever; Ctrl-C (SIGINT) triggers a clean shutdown after the current sleep. Logging is stdout only — no log file.
+`run` reloads the config at the start of every cycle (edits take effect without a restart), reconciles the home screen to the config, then sleeps to the next fixed time of day. It runs forever; Ctrl-C (SIGINT) triggers a clean shutdown after the current sleep. Logging is stdout only — no log file.
+
+Cycles fire on wall-clock boundaries — the multiples of `interval_minutes` from local midnight in `cadence.timezone` — not "interval after the last cycle". With `interval_minutes: 180` that is 00:00, 03:00, 06:00 … every day, so the rotation changes at the same times no matter when the process was started or last restarted. See [ADR-0008](docs/adr/0008-wall-clock-schedule-and-forced-refresh.md).
+
+## Forcing a refresh
+
+```
+plex-home once [--config config.yaml]
+docker exec <container> plex-home once
+```
+
+`once` runs a single reconcile and exits — for pushing an edited config live immediately instead of waiting out the interval. It is a separate short-lived process, so it shares `pin_history.json` with a running daemon but leaves the daemon's sleep alone; the fixed daily schedule keeps its phase. Restarting the container also forces a cycle, but resets that phase to the restart moment. Exit codes: `0` reconciled, `1` cycle failed, `2` config wouldn't load.
 
 ## CLI — live home-screen control
 
@@ -53,7 +64,8 @@ plex_token: xxxxxxxxxxxx
 library_names: [Movies, TV Shows]
 
 cadence:
-  interval_minutes: 180
+  interval_minutes: 180          # cycles at 00:00, 03:00, 06:00 … local
+  timezone: America/New_York
   repeat_block_hours: 12
   min_items_for_pinning: 10
 
@@ -81,7 +93,7 @@ home:
 |-----|---------|
 | `plex_url`, `plex_token` | Plex server URL and auth token (required) |
 | `library_names` | Libraries to manage (required) |
-| `cadence` | `interval_minutes` (required), `repeat_block_hours` (default 24), `min_items_for_pinning` (default 10), `mirror_recommended` (default false — when true, resolved pins are also force-promoted to Library Recommended) |
+| `cadence` | `interval_minutes` (required, must divide 1440 so cycles land on fixed daily times), `timezone` (IANA name, default `America/New_York` — drives both the cycle times and every group `date`/`time` window), `repeat_block_hours` (default 24), `min_items_for_pinning` (default 10), `mirror_recommended` (default false — when true, resolved pins are also force-promoted to Library Recommended) |
 | `groups` | Named collection groups a `pick` slot draws from — each with optional `date`/`time`/`include_labels`/`include_collections`/`exclude_labels`/`exclude_collections` and per-group cadence overrides. A group carries **no** library; its library is the `home` section that references it (so the same group may be reused under more than one library). |
 | `home` | Mapping of **library name → ordered list of slots**; each slot is `{collection: "<title>"}` (any managed hub by title — collection or system) or `{pick: [<group>, ...]}` (collections only). Every key must be one of `library_names`. |
 | `webhook_url` | Optional; POSTs a per-cycle summary of pinned titles |

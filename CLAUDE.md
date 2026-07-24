@@ -6,14 +6,23 @@ The code is a `plex_home` package under `src/`, with the test suite in `tests/`.
 
 ## Running
 
-The package exposes one console command, `plex-home`, with subcommands: `run` (the daemon), a live-control CLI (`list`, `pin`, `unpin`, `move`), and `simulate` (a dry run). A global `--config` flag (default `config.yaml`) supplies the Plex connection for every subcommand. Without installing, the equivalent is `python -m plex_home` (with `src/` on `PYTHONPATH`).
+The package exposes one console command, `plex-home`, with subcommands: `run` (the daemon), `once` (one forced reconcile), a live-control CLI (`list`, `pin`, `unpin`, `move`), and `simulate` (a dry run). A global `--config` flag (default `config.yaml`) supplies the Plex connection for every subcommand. Without installing, the equivalent is `python -m plex_home` (with `src/` on `PYTHONPATH`).
 
 ### Daemon
 ```
 pip install -e .
 plex-home run [--config config.yaml]
 ```
-`run` reloads the config at the start of every cycle (so edits take effect without a restart), reconciles the home screen to the config, then sleeps `interval_minutes`. It runs forever; interrupt with Ctrl-C — SIGINT triggers a clean shutdown after the current sleep. Logging goes to stdout only (there is no log file).
+`run` reloads the config at the start of every cycle (so edits take effect without a restart), reconciles the home screen to the config, then sleeps to the **next fixed time of day**. It runs forever; interrupt with Ctrl-C — SIGINT triggers a clean shutdown after the current sleep. Logging goes to stdout only (there is no log file).
+
+Cycles fire on wall-clock boundaries — the multiples of `interval_minutes` measured from local midnight in `cadence.timezone` — *not* at "interval after the last cycle". With `interval_minutes: 180` that is 00:00, 03:00, 06:00 … every day, so users see the rotation change at the same times regardless of when the container was started or last restarted. `schedule.next_boundary` computes it from the clock's wall-clock fields, so a DST change shifts the real gap between two cycles (a 2h or 4h day) without ever sliding the schedule off the hour.
+
+### `once` — force a refresh now
+```
+plex-home once [--config config.yaml]
+docker exec <container> plex-home once
+```
+Runs exactly one reconcile (same `run_cycle` the daemon calls) and exits. Intended for pushing an edited config live immediately instead of waiting out the interval. It is a **separate short-lived process**: it reads and writes the same `pin_history.json`, so the forced pins are visible to the daemon's next cycle, but the daemon's own sleep is untouched and the fixed daily schedule keeps its phase. Restarting the container also forces a cycle, but resets the schedule's phase to the restart moment — `once` is the one that doesn't. Exit codes: `0` reconciled, `1` the cycle failed, `2` the config wouldn't load.
 
 ### CLI — live home-screen control (ADR-0005)
 `list` / `pin` / `unpin` / `move` operate on the live Plex home screen **imperatively**, independent of the config. The home screen is treated as a per-library, indexed list of pinned hubs (system and collection hubs alike). A running daemon reconciles the home back to the config, so CLI changes are ephemeral against it.
@@ -26,11 +35,11 @@ plex-home move  <index|Title> --library NAME (--to K | --up [N] | --down [N] | -
 `--dry-run` prints the intended operation without calling Plex. Index targets are per-library, so `--library` is required for index-based `unpin`/`move`; title targets auto-resolve across configured libraries (error on collision). Plex drops a fresh `pin` at a Plex-determined position (observed mid-list), so use `--to K` for explicit placement.
 
 ### `simulate` — dry-run the rotation forward in time
-`simulate` reads the live Plex collections (read-only) once, then walks the resolver forward over simulated cycles — advancing a clock by `cadence.interval_minutes`, threading the repeat-block history in memory, recording pins at simulated time — and writes a text report. It never calls the pin/unpin/order writers, so it cannot change the real home screen. Use it to preview the rotation and verify the interval/repeat-block behaviour before running the daemon.
+`simulate` reads the live Plex collections (read-only) once, then walks the resolver forward over simulated cycles — stepping the clock from one wall-clock cycle boundary to the next (the same `schedule.next_boundary` the daemon sleeps to, so the timestamps are the times it would really fire at, DST included), threading the repeat-block history in memory, recording pins at simulated time — and writes a text report. It never calls the pin/unpin/order writers, so it cannot change the real home screen. Use it to preview the rotation and verify the interval/repeat-block behaviour before running the daemon.
 ```
 plex-home simulate [--days N] [--start YYYY-MM-DD] [--seed N] [--out report.txt]
 ```
-`--days` (default 7) sets the span (cycle count = `days*1440 / interval_minutes`). `--start` (default now, UTC) seeds the clock — set it inside a group's `date` window to exercise seasonal groups. `--seed` (default 0) fixes the RNG so pick slots are reproducible. The report has a TIMELINE (per-cycle pins in slot order, plus empty-pick notes), a PIN FREQUENCY table, and a REPEAT-BLOCK VERIFICATION section that PASS/FAILs each pick collection against its effective `repeat_block_hours` (fixed slots re-pin every cycle by design and are not checked).
+`--days` (default 7) sets the span (cycle count = `days*1440 / interval_minutes`). `--start` (default now) seeds the clock and is read as a wall-clock time in `cadence.timezone` unless it carries its own offset; it then snaps forward to the first real cycle boundary. Set it inside a group's `date` window to exercise seasonal groups, or inside a `time` window to exercise a late-night one. `--seed` (default 0) fixes the RNG so pick slots are reproducible. The report has a TIMELINE (per-cycle pins in slot order, plus empty-pick notes), a PIN FREQUENCY table, and a REPEAT-BLOCK VERIFICATION section that PASS/FAILs each pick collection against its effective `repeat_block_hours` (fixed slots re-pin every cycle by design and are not checked).
 
 ### Docker
 The container installs the package and runs the daemon (`CMD ["plex-home", "run"]`). Mount the YAML config; read logs via `docker logs` (stdout, no file):
@@ -39,6 +48,12 @@ docker build -t plex-home .
 docker run -d \
   -v $(pwd)/config.yaml:/app/config.yaml \
   plex-home
+```
+The image sets `TZ` so `docker logs` timestamps read in local time — that env var is **cosmetic only**. The schedule and every group `date`/`time` window come from `cadence.timezone` in the config, which the code reads explicitly. The zone database itself comes from the `tzdata` dependency, since a slim Python image ships none and `zoneinfo` would otherwise fail to resolve any zone name.
+
+To push an edited config live without waiting for the next cycle (and without restarting, which would reset the schedule's phase):
+```
+docker exec <container> plex-home once
 ```
 
 ## Configuration (`config.yaml`)
@@ -61,7 +76,8 @@ All runtime behaviour is controlled by a YAML config (default path `config.yaml`
 
 | Key | Default | Purpose |
 |-----|---------|---------|
-| `interval_minutes` | — (required, > 0) | Minutes between cycles |
+| `interval_minutes` | — (required, > 0) | Minutes between cycles. Must divide 1440 evenly (cycles land on fixed daily times, so a ragged last slot is rejected with a `ConfigError`) |
+| `timezone` | `America/New_York` | IANA zone name for **both** the cycle times and every group `date`/`time` window. Use a zone name (`America/New_York`), not an abbreviation (`EST`) — an abbreviation is a fixed offset and would slide an hour during DST |
 | `repeat_block_hours` | `24` | Hours a pinned collection is blocked from being re-pinned |
 | `min_items_for_pinning` | `10` | Collections with fewer items are skipped |
 | `mirror_recommended` | `false` | When `true`, resolved pins are also force-promoted to Library Recommended so the Recommended tab mirrors Home; default leaves each pin's Recommended flag as-is |
@@ -118,7 +134,8 @@ plex_token: xxxxxxxxxxxx
 library_names: [Movies, TV Shows]
 
 cadence:
-  interval_minutes: 180
+  interval_minutes: 180          # cycles at 00:00, 03:00, 06:00 … local
+  timezone: America/New_York
   repeat_block_hours: 12
   min_items_for_pinning: 10
 
@@ -149,7 +166,8 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 | File | Purpose |
 |------|---------|
 | `src/plex_home/config.py` | Config loader — parses and validates the YAML config into typed dataclasses |
-| `src/plex_home/eligibility.py` | Group eligibility engine — evaluates date/time constraints and applies include/exclude/min-items filters (collection filters use `matching.title_matches`) |
+| `src/plex_home/eligibility.py` | Group eligibility engine — evaluates date/time constraints and applies include/exclude/min-items filters (collection filters use `matching.title_matches`). Compares against whatever clock the caller's `now` carries, which is `cadence.timezone` |
+| `src/plex_home/schedule.py` | Cycle scheduling — `next_boundary` (next multiple of `interval_minutes` from local midnight, computed on wall-clock fields so DST can't slide it) and `seconds_until` (the wait, converted through UTC). Shared by the daemon and `simulate` |
 | `src/plex_home/matching.py` | Title-spec matching — parses the `glob:`/`re:` sigil, expands `{YEAR}`/`{MONTH}`/`{WEEK}`/`{DAY}` variables, and whole-title matches (exact / `fnmatchcase` / `re.fullmatch`) |
 | `src/plex_home/plex_client.py` | Plex data-access layer — connects to PlexServer, fetches collections per library as CollectionInfo objects |
 | `src/plex_home/history.py` | Repeat-block history — tracks pinned collections with timestamps, answers "is this blocked?" |
@@ -159,7 +177,7 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 | `src/plex_home/ordering.py` | Hub ordering — reorders each library's pinned hubs to match slot order via `managed_hubs.realize_order` (move-to-top, works for system + Plex-curated hubs) |
 | `src/plex_home/webhook.py` | Optional webhook notifier — POSTs a per-cycle summary (pinned titles + timestamp) when `webhook_url` is configured; never raises |
 | `src/plex_home/simulate.py` | Dry-run simulator (`simulate` subcommand) — advances a simulated clock over N days, re-runs the resolver each cycle against a read-only Plex snapshot, threads history in memory, and renders a text report (timeline + pin frequency + repeat-block PASS/FAIL). Never calls the writers |
-| `src/plex_home/main.py` | Entrypoint logic — builds the subcommand parser and dispatches: `run` → the daemon loop (reload config each cycle, fetch → resolve → pin → order → webhook, sleep, clean SIGINT shutdown, per-cycle error retry); `list`/`pin`/`unpin`/`move` → the CLI handlers. Exposed as the `plex-home` console script and `python -m plex_home` |
+| `src/plex_home/main.py` | Entrypoint logic — builds the subcommand parser and dispatches: `run` → the daemon loop (reload config each cycle, fetch → resolve → pin → order → webhook, sleep to the next wall-clock boundary, clean SIGINT shutdown, per-cycle error retry); `once` → a single reconcile then exit; `list`/`pin`/`unpin`/`move` → the CLI handlers. Exposed as the `plex-home` console script and `python -m plex_home` |
 | `src/plex_home/hubs.py` | Imperative managed-hub layer for the CLI (ADR-0005) — lists pinned hubs per library as an indexed order, and pins/unpins/moves them via `ManagedHub` (system + collection uniform); never touches the config |
 | `src/plex_home/cli.py` | CLI subcommand parsing, library resolution, relative-move math, and table/JSON output for `list`/`pin`/`unpin`/`move` |
 | `src/plex_home/__main__.py` | `python -m plex_home` shim — calls `main.main()` |
@@ -167,6 +185,7 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 | `tests/test_config.py` | Pytest suite for config loader (run with `.venv/bin/pytest`) |
 | `tests/test_history.py` | Pytest suite for repeat-block history |
 | `tests/test_eligibility.py` | Pytest suite for group eligibility engine |
+| `tests/test_schedule.py` | Pytest suite for wall-clock cycle scheduling (boundaries, day rollover, restart-independence, both DST transitions) |
 | `tests/test_matching.py` | Pytest suite for title-spec matching (sigils, variables, exact/glob/regex) |
 | `tests/test_plex_client.py` | Pytest suite for Plex client (fully mocked) |
 | `tests/test_resolver.py` | Pytest suite for slot resolver |
@@ -188,6 +207,8 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 
 - **Logging is stdout-only** — `main.py` calls `logging.basicConfig` with no file handler, so there is no log file to rotate or truncate. Under Docker, read logs via `docker logs`.
 - **No `timeout` on macOS** — macOS ships no `timeout` binary and GNU coreutils' `gtimeout` isn't installed by default, so `timeout 20 docker run …` dies with `command not found`. To time-bound a container run, bound it container-side: run detached and `docker stop` it (or install coreutils for `gtimeout`), rather than wrapping the run in a host-side `timeout`.
+- **Everything time-based runs on `cadence.timezone`, but stored timestamps stay UTC** — `run_cycle` builds `now` from the configured zone, and `eligibility` compares a group's `date`/`time` window against that local wall clock, so `time: 21:00-03:00` means 9pm local. `pin_history.json` keeps UTC timestamps, so the repeat block measures real elapsed hours and is unaffected by a DST change. Before this existed the clock was hardcoded UTC, which silently made every `time:` window mean UTC — an existing window written against the old behaviour will now fire at a different local hour.
+- **`interval_minutes` must divide 1440** — cycles fire at fixed times of day, so an interval that doesn't tile a day (e.g. `50`) is a `ConfigError` at load rather than a short slot before midnight. The daemon treats that like any config error: it logs and retries in 5 minutes, so a bad edit stalls the rotation instead of crashing the container.
 - **`pin_history.json` is mutable state, and it lives beside the config** — `history.py` rewrites it each cycle (nested `{library: {title: last-pinned UTC timestamp}}`, keyed per-library). Its path comes from `Config.history_path`, which `load_config` sets to the config file's own directory — *not* the process working directory, so where the daemon is launched from can't decide whether the history survives. `load_history`/`save_history` take the path as an argument; there is no module-level default. Delete the file to reset; a missing, corrupt, or legacy flat-format file is handled gracefully (starts fresh).
 - **Tests need `src/` on the path** — `pyproject.toml` sets `pythonpath = ["src"]`, so `.venv/bin/pytest` imports `plex_home` without an install. Running pytest a different way (or importing the modules directly) requires `pip install -e .` or `PYTHONPATH=src` first.
 - **Config errors don't crash the daemon** — `config.py` raises `ConfigError` on any invalid or missing field; `main.py` catches it, logs the message, and retries in 5 minutes (`CONFIG_ERROR_RETRY_MINUTES`) instead of exiting.

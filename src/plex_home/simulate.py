@@ -2,7 +2,7 @@
 
 Reuses the real resolver against a real (read-only) snapshot of the Plex
 libraries, but never calls the pin/unpin/order writers. It advances a simulated
-clock by ``cadence.interval_minutes`` for each cycle, threads the repeat-block
+clock from one wall-clock cycle boundary to the next, threads the repeat-block
 history in memory (recording pins at simulated time, mirroring what
 ``pinning.apply_pins`` + ``history.record_pins`` would persist), and collects
 what *would* be pinned each cycle.
@@ -10,7 +10,8 @@ what *would* be pinned each cycle.
 The output is a human-readable text report that lets you eyeball the rotation and
 verify the two time-based behaviours:
 
-  - **interval** — cycle timestamps are spaced exactly ``interval_minutes`` apart.
+  - **schedule** — cycle timestamps land on the fixed daily times the daemon
+    fires at, in ``cadence.timezone``.
   - **repeat-block** — a pick-selected collection is never re-pinned before its
     effective ``repeat_block_hours`` has elapsed (fixed slots re-pin every cycle
     by design and are reported as such, not flagged).
@@ -19,13 +20,14 @@ from __future__ import annotations
 import copy
 import random
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, tzinfo
 
 from .config import Config, expand_templates
 from .plex_client import CollectionInfo
 from .resolver import resolve_slots
+from .schedule import next_boundary
 
-_TS_FMT = "%Y-%m-%d %H:%M UTC"
+_TS_FMT = "%Y-%m-%d %H:%M %Z"
 
 
 @dataclass
@@ -37,15 +39,20 @@ class PinEvent:
     rbh: float | None    # effective repeat_block_hours for a pick; None for fixed
 
 
-def _parse_start(start: str | None) -> datetime:
-    """Parse a ``--start`` value (YYYY-MM-DD or full ISO) into an aware UTC datetime."""
+def _parse_start(start: str | None, tz: tzinfo) -> datetime:
+    """Parse a ``--start`` value (YYYY-MM-DD or full ISO) into an aware datetime.
+
+    A value with no offset is read as a wall-clock time in the configured
+    timezone — ``--start 2026-12-24`` means local midnight on Christmas Eve, the
+    same clock the group ``date``/``time`` windows are compared against.
+    """
     if start is None:
-        return datetime.now(tz=timezone.utc)
+        return datetime.now(tz=tz)
     try:
         dt = datetime.fromisoformat(start)
     except ValueError:
         raise ValueError(f"--start must be YYYY-MM-DD or ISO 8601, got: {start!r}")
-    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+    return dt.replace(tzinfo=tz) if dt.tzinfo is None else dt
 
 
 def run_simulation(
@@ -65,7 +72,11 @@ def run_simulation(
     unaffected (expansion is a no-op).
     """
     interval = config.cadence.interval_minutes
-    now = _parse_start(start)
+    # Start on a real cycle boundary and step boundary-to-boundary, so simulated
+    # timestamps are the wall-clock times the daemon would actually fire at —
+    # including across a DST change, where a flat +interval step would slide an
+    # hour off the schedule for the rest of the run.
+    now = next_boundary(_parse_start(start, config.cadence.timezone), interval)
     cycles = max(1, int(days * 24 * 60 / interval))
 
     rng = random.Random(seed)
@@ -104,7 +115,7 @@ def run_simulation(
         for pin in resolved:
             history[(pin.library, pin.title)] = now
 
-        now += timedelta(minutes=interval)
+        now = next_boundary(now, interval)
 
     return _render_report(config, days, seed, cycles, cycle_log, events)
 
@@ -125,7 +136,8 @@ def _render_report(
     a("PLEX HOME — SIMULATION REPORT (dry run, no Plex writes)")
     a("=" * 72)
     a(f"Libraries          : {', '.join(config.library_names)}")
-    a(f"Interval           : {cad.interval_minutes} min")
+    a(f"Interval           : {cad.interval_minutes} min (on fixed daily boundaries)")
+    a(f"Timezone           : {cad.timezone}")
     a(f"Repeat-block        : {cad.repeat_block_hours} h (cadence default)")
     a(f"Min items          : {cad.min_items_for_pinning}")
     a(f"Simulated span     : {days} day(s) → {cycles} cycle(s)")

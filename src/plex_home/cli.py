@@ -1,7 +1,8 @@
 """CLI subcommand parsing, dispatch, and output for the home-screen tool (ADR-0005).
 
 Defines the ``list`` / ``pin`` / ``unpin`` / ``move`` commands over the imperative
-``hubs`` layer. ``run`` (the daemon) is wired in ``main`` and dispatched from here.
+``hubs`` layer. ``run`` (the daemon) and ``once`` (a single forced reconcile) are
+parsed here but dispatched in ``main``, which owns the cycle they both drive.
 """
 from __future__ import annotations
 import argparse
@@ -26,6 +27,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("run", help="Run the pinning daemon (reconciles home to config each cycle)")
+    sub.add_parser(
+        "once",
+        help="Reconcile the home to the config once and exit (leaves a running daemon's schedule alone)",
+    )
 
     p_list = sub.add_parser("list", help="List the pinned home-screen hubs per library")
     p_list.add_argument("--library", help="Limit to one library")
@@ -61,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Dry-run the pinner forward in time and write a report (reads Plex, never writes)",
     )
     p_sim.add_argument("--days", type=float, default=7.0, help="Days to simulate (default: 7)")
-    p_sim.add_argument("--start", help="Sim start as YYYY-MM-DD or ISO 8601 (default: now UTC)")
+    p_sim.add_argument("--start", help="Sim start as YYYY-MM-DD or ISO 8601, read in cadence.timezone (default: now)")
     p_sim.add_argument("--seed", type=int, default=0, help="RNG seed for reproducible picks (default: 0)")
     p_sim.add_argument("--out", default="simulation_report.txt", help="Report file to write (default: simulation_report.txt)")
 

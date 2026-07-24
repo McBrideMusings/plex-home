@@ -11,6 +11,10 @@ dependencies = [
     "plexapi",
     "requests",
     "pyyaml",
+    # zoneinfo reads the system tz database, which slim container images do not
+    # ship; this is the pure-Python fallback it looks up when that is missing, so
+    # cadence.timezone resolves the same in Docker as on a dev machine.
+    "tzdata",
 ]
 
 [project.scripts]

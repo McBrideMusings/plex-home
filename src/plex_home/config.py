@@ -1,12 +1,18 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, tzinfo
 from pathlib import Path
 from typing import Optional, Union
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import re
 import yaml
 
 from . import matching
+from .schedule import MINUTES_PER_DAY
+
+#: Timezone used for cycle scheduling and for every date/time window in the
+#: config when ``cadence.timezone`` is not set.
+DEFAULT_TIMEZONE = "America/New_York"
 
 _DATE_RE = re.compile(r"^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])/(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$")
@@ -55,6 +61,10 @@ class Cadence:
     repeat_block_hours: float = 24.0
     min_items_for_pinning: int = 10
     mirror_recommended: bool = False
+    #: The clock everything time-based runs on: which wall-clock times the cycles
+    #: fire at, and which day and time-of-day a group's ``date``/``time`` window is
+    #: compared against. Stored timestamps (``pin_history.json``) stay UTC.
+    timezone: tzinfo = ZoneInfo(DEFAULT_TIMEZONE)
 
 
 @dataclass
@@ -98,7 +108,9 @@ def load_config(path: str, expand: bool = True) -> Config:
     home = _parse_home(raw["home"], groups, library_names)
 
     if expand:
-        expand_templates(home, groups, datetime.now(timezone.utc))
+        # Expand against the configured clock, not UTC, so a {YEAR}/{DAY} title
+        # rolls over at local midnight — the same instant the group date windows do.
+        expand_templates(home, groups, datetime.now(cadence.timezone))
 
     return Config(
         plex_url=plex_url,
@@ -181,6 +193,15 @@ def _parse_cadence(raw: object) -> Cadence:
     interval = raw["interval_minutes"]
     if not isinstance(interval, int) or interval <= 0:
         raise ConfigError("'cadence.interval_minutes' must be a positive integer")
+    # Cycles fire at fixed times of day, so the interval has to tile a day exactly
+    # — otherwise the last slot before midnight would be a short one.
+    if MINUTES_PER_DAY % interval != 0:
+        raise ConfigError(
+            f"'cadence.interval_minutes' must divide {MINUTES_PER_DAY} evenly so cycles "
+            f"land on fixed daily times, got: {interval}"
+        )
+
+    tz = _parse_timezone(raw.get("timezone", DEFAULT_TIMEZONE))
 
     rbh = raw.get("repeat_block_hours", 24.0)
     if not isinstance(rbh, (int, float)) or rbh < 0:
@@ -199,7 +220,20 @@ def _parse_cadence(raw: object) -> Cadence:
         repeat_block_hours=float(rbh),
         min_items_for_pinning=mip,
         mirror_recommended=mirror,
+        timezone=tz,
     )
+
+
+def _parse_timezone(raw: object) -> tzinfo:
+    if not isinstance(raw, str) or not raw.strip():
+        raise ConfigError("'cadence.timezone' must be an IANA timezone name, e.g. America/New_York")
+    try:
+        return ZoneInfo(raw)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise ConfigError(
+            f"'cadence.timezone' is not a known IANA timezone name: {raw!r} "
+            f"(use e.g. America/New_York, not EST)"
+        )
 
 
 def _parse_groups(raw: object) -> dict[str, Group]:
