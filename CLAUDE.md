@@ -6,7 +6,7 @@ The code is a `plex_home` package under `src/`, with the test suite in `tests/`.
 
 ## Running
 
-The package exposes one console command, `plex-home`, with subcommands: `run` (the daemon), `once` (one forced reconcile), a live-control CLI (`list`, `pin`, `unpin`, `move`), and `simulate` (a dry run). A global `--config` flag (default `config.yaml`) supplies the Plex connection for every subcommand. Without installing, the equivalent is `python -m plex_home` (with `src/` on `PYTHONPATH`).
+The package exposes one console command, `plex-home`, with subcommands: `run` (the daemon), `once` (one forced reconcile), a live-control CLI (`list`, `pin`, `unpin`, `move`), `simulate` (a dry run), and `tags` (queries plex-db-ex's snapshot). A global `--config` flag (default `config.yaml`) supplies the Plex connection for every subcommand. Without installing, the equivalent is `python -m plex_home` (with `src/` on `PYTHONPATH`).
 
 ### Daemon
 ```
@@ -41,6 +41,15 @@ plex-home simulate [--days N] [--start YYYY-MM-DD] [--seed N] [--out report.txt]
 ```
 `--days` (default 7) sets the span (cycle count = `days*1440 / interval_minutes`). `--start` (default now) seeds the clock and is read as a wall-clock time in `cadence.timezone` unless it carries its own offset; it then snaps forward to the first real cycle boundary. Set it inside a group's `date` window to exercise seasonal groups, or inside a `time` window to exercise a late-night one. `--seed` (default 0) fixes the RNG so pick slots are reproducible. The report has a TIMELINE (per-cycle pins in slot order, plus empty-pick notes), a PIN FREQUENCY table, and a REPEAT-BLOCK VERIFICATION section that PASS/FAILs each pick collection against its effective `repeat_block_hours` (fixed slots re-pin every cycle by design and are not checked).
 
+### `tags` — query plex-db-ex's tag and watch data
+`tags` reads the snapshot named by `plexdb_snapshot` through `tagsource`, read-only, and never connects to Plex. It is the programmatic surface for what rule-set generation samples from.
+```
+plex-home tags query   <tag> [<tag> ...] [--kind movie|show] [--limit N] [--json]
+plex-home tags related <tag> --kind movie|show [--limit N] [--json]
+plex-home tags plays   [--min-seconds N] [--limit N] [--json]
+```
+`query` lists titles carrying **every** tag, each with its Plex rating key(s); `related` lists co-tags from plex-db-ex's `tag_network_edge`, strongest first; `plays` ranks titles by play count, episodes rolled up to their show. `--min-seconds` drops plays whose `seconds_watched` is known and shorter; a null (Plex-only history, which records only near-finished plays) always counts. Exit codes: `0` ok, `1` no snapshot configured or it is missing/incompatible, `2` the config wouldn't load.
+
 ### Docker
 The container installs the package and runs the daemon (`CMD ["plex-home", "run"]`). Mount the YAML config; read logs via `docker logs` (stdout, no file):
 ```
@@ -71,6 +80,7 @@ All runtime behaviour is controlled by a YAML config (default path `config.yaml`
 | `groups` | mapping (required) | Named collection groups that `pick` slots draw from — see below |
 | `home` | mapping (required) | Library name → ordered home-screen slots — see below |
 | `webhook_url` | string (optional) | POSTed a per-cycle summary of pinned titles; omit to disable |
+| `plexdb_snapshot` | path (optional) | plex-db-ex's published snapshot (`plexdb publish`), opened read-only by `tagsource`; relative paths resolve against the config file's directory. Never opened at load, so a missing file can't stop a cycle |
 
 ### `cadence`
 
@@ -176,11 +186,12 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 | `src/plex_home/managed_hubs.py` | Shared kind-agnostic managed-hub primitives (ADR-0007) used by `pinning`/`ordering`/`hubs`: `is_collection`, `on_home`, `promoted_anywhere`, `title_map` (collection wins on title collision), `realize_order` (reverse move-to-top), `iter_library_hubs` (per-library fetch-and-skip for the writers) |
 | `src/plex_home/pinning.py` | Pin engine — fully manages all three visibility axes (ADR-0007): promotes resolved pins (system + collection), `remove()`s non-resolved collections from the managed list, demotes non-resolved system hubs, updates repeat-block history |
 | `src/plex_home/ordering.py` | Hub ordering — reorders each library's pinned hubs to match slot order via `managed_hubs.realize_order` (move-to-top, works for system + Plex-curated hubs) |
+| `src/plex_home/tagsource.py` | Read-only door into plex-db-ex's published snapshot — `TagSource` protocol and `SnapshotTagSource`: titles carrying all given tags (with Plex `(section_id, rating_key)` pairs), tags per title, co-tags from `tag_network_edge`, play counts (episodes rolled up to shows). Normalizes a caller's tag with plex-db-ex's own Snowball stemming so `Heists` matches stored `heist` |
 | `src/plex_home/webhook.py` | Optional webhook notifier — POSTs a per-cycle summary (pinned titles + timestamp) when `webhook_url` is configured; never raises |
 | `src/plex_home/simulate.py` | Dry-run simulator (`simulate` subcommand) — advances a simulated clock over N days, re-runs the resolver each cycle against a read-only Plex snapshot, threads history in memory, and renders a text report (timeline + pin frequency + repeat-block PASS/FAIL). Never calls the writers |
-| `src/plex_home/main.py` | Entrypoint logic — builds the subcommand parser and dispatches: `run` → the daemon loop (reload config each cycle, fetch → resolve → pin → order → webhook, sleep to the next wall-clock boundary, clean SIGINT shutdown, per-cycle error retry); `once` → a single reconcile then exit; `list`/`pin`/`unpin`/`move` → the CLI handlers. Exposed as the `plex-home` console script and `python -m plex_home` |
+| `src/plex_home/main.py` | Entrypoint logic — builds the subcommand parser and dispatches: `run` → the daemon loop (reload config each cycle, fetch → resolve → pin → order → webhook, sleep to the next wall-clock boundary, clean SIGINT shutdown, per-cycle error retry); `once` → a single reconcile then exit; `list`/`pin`/`unpin`/`move` → the CLI handlers; `tags` → the snapshot reader (never connects to Plex). Exposed as the `plex-home` console script and `python -m plex_home` |
 | `src/plex_home/hubs.py` | Imperative managed-hub layer for the CLI (ADR-0005) — lists pinned hubs per library as an indexed order, and pins/unpins/moves them via `ManagedHub` (system + collection uniform); never touches the config |
-| `src/plex_home/cli.py` | CLI subcommand parsing, library resolution, relative-move math, and table/JSON output for `list`/`pin`/`unpin`/`move` |
+| `src/plex_home/cli.py` | CLI subcommand parsing, library resolution, relative-move math, and table/JSON output for `list`/`pin`/`unpin`/`move` and the `tags` subcommands (`query`/`related`/`plays`, text capped at 50 rows without `--limit`) |
 | `src/plex_home/__main__.py` | `python -m plex_home` shim — calls `main.main()` |
 | `src/plex_home/__init__.py` | Package marker |
 | `tests/test_config.py` | Pytest suite for config loader (run with `.venv/bin/pytest`) |
@@ -194,6 +205,7 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 | `tests/test_managed_hubs.py` | Pytest suite for the shared managed-hub primitives (fully mocked) |
 | `tests/test_pinning.py` | Pytest suite for pin engine — promote/remove/demote reconcile (fully mocked) |
 | `tests/test_ordering.py` | Pytest suite for hub ordering (fully mocked) |
+| `tests/test_tagsource.py` | Pytest suite for the plex-db-ex reader against a fixture SQLite built from plex-db-ex's documented schema, plus `tags` through `main` |
 | `tests/test_webhook.py` | Pytest suite for the webhook notifier (fully mocked) |
 | `tests/test_main.py` | Pytest suite for the main loop + run_cycle wiring + subcommand dispatch (fully mocked) |
 | `tests/test_hubs.py` | Pytest suite for the managed-hub operations layer (fully mocked) |
@@ -215,6 +227,7 @@ All modules live in `src/plex_home/`; all tests in `tests/`.
 - **`repeat_block_hours` fights a seasonal pick slot** — a holiday group with one collection and the 12h default block pins on its first cycle, then goes empty for the next four. Set `repeat_block_hours: 0` on such a group so it holds the slot for the whole window.
 - **`interval_minutes` must divide 1440** — cycles fire at fixed times of day, so an interval that doesn't tile a day (e.g. `50`) is a `ConfigError` at load rather than a short slot before midnight. The daemon treats that like any config error: it logs and retries in 5 minutes, so a bad edit stalls the rotation instead of crashing the container.
 - **`pin_history.json` is mutable state, and it lives beside the config** — `history.py` rewrites it each cycle (nested `{library: {title: last-pinned UTC timestamp}}`, keyed per-library). Its path comes from `Config.history_path`, which `load_config` sets to the config file's own directory — *not* the process working directory, so where the daemon is launched from can't decide whether the history survives. `load_history`/`save_history` take the path as an argument; there is no module-level default. Delete the file to reset; a missing, corrupt, or legacy flat-format file is handled gracefully (starts fresh).
+- **`plexdb_snapshot` must be the published snapshot, never plex-db-ex's live store** — plex-db-ex's ADR-0007 gives consumers the snapshot, never the live store. The live `plexdb.db` runs in WAL mode: a read-only (`mode=ro`) open works only while its `-shm` sidecar exists beside it, and fails with `unable to open database file` on a copied WAL file or from a read-only mount. `plexdb publish` writes a rollback-journal copy via `VACUUM INTO`, which opens read-only from any directory. To make one locally from a copied store: `sqlite3 copy.db "VACUUM INTO 'plexdb.snapshot.db'"`.
 - **Tests need `src/` on the path** — `pyproject.toml` sets `pythonpath = ["src"]`, so `.venv/bin/pytest` imports `plex_home` without an install. Running pytest a different way (or importing the modules directly) requires `pip install -e .` or `PYTHONPATH=src` first.
 - **Config errors don't crash the daemon** — `config.py` raises `ConfigError` on any invalid or missing field; `main.py` catches it, logs the message, and retries in 5 minutes (`CONFIG_ERROR_RETRY_MINUTES`) instead of exiting.
 - **Same-titled collections in one library collide** — everything keys by `(library, title)`, so two collections with an identical title in the same library are indistinguishable: `managed_hubs.title_map` keeps one and the sweep un-manages the other (ADR-0007). Give collections distinct titles within a library. A collection and a *system* hub sharing a title is fine — the collection wins.

@@ -351,6 +351,17 @@ def test_history_path_ignores_the_working_directory(tmp_path, monkeypatch):
     assert config.history_path.parent == tmp_path.resolve()
 
 
+def test_plexdb_snapshot_resolves_beside_config_and_is_not_opened(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.dump(merge(BASE, {"plexdb_snapshot": "snap/plexdb.snapshot.db"})), encoding="utf-8")
+
+    config = load_config(str(cfg))
+
+    # The file doesn't exist; load still succeeds because nothing opens it here.
+    assert config.plexdb_snapshot == tmp_path.resolve() / "snap" / "plexdb.snapshot.db"
+    assert load_config(write_yaml(BASE)).plexdb_snapshot is None
+
+
 # --- variable expansion + pattern validation (issue #2) ---
 
 def test_year_variable_expands_at_load():

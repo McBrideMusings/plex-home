@@ -15,6 +15,7 @@ cadence:
   mirror_recommended: false    # also force pins into Library Recommended
 
 # webhook_url: https://example.com/hook   # optional per-cycle summary POST
+# plexdb_snapshot: plexdb.snapshot.db     # optional plex-db-ex snapshot (relative to this file), read-only
 
 groups:
   # Seasonal: only eligible inside the date window.

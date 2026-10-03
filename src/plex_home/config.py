@@ -87,6 +87,10 @@ class Config:
     #: config for the same reason ``history_path`` is: one mounted directory
     #: holds everything one deployment owns.
     lock_path: Path = Path(".plex-home.lock")
+    #: plex-db-ex's published snapshot, opened read-only by ``tagsource``. A
+    #: relative path resolves against the config file's directory. Never opened
+    #: at load, so a missing snapshot can't stop a home-screen cycle.
+    plexdb_snapshot: Optional[Path] = None
 
 
 def load_config(path: str, expand: bool = True) -> Config:
@@ -107,6 +111,10 @@ def load_config(path: str, expand: bool = True) -> Config:
     plex_token = _require_str(raw, "plex_token")
     library_names = _require_str_list(raw, "library_names")
     webhook_url = raw.get("webhook_url") or None
+    config_dir = Path(path).resolve().parent
+    plexdb_snapshot = None
+    if raw.get("plexdb_snapshot") is not None:
+        plexdb_snapshot = config_dir / _require_str(raw, "plexdb_snapshot")
 
     cadence = _parse_cadence(raw["cadence"])
     groups = _parse_groups(raw["groups"])
@@ -125,8 +133,9 @@ def load_config(path: str, expand: bool = True) -> Config:
         home=home,
         groups=groups,
         webhook_url=webhook_url,
-        history_path=Path(path).resolve().parent / "pin_history.json",
-        lock_path=Path(path).resolve().parent / ".plex-home.lock",
+        history_path=config_dir / "pin_history.json",
+        lock_path=config_dir / ".plex-home.lock",
+        plexdb_snapshot=plexdb_snapshot,
     )
 
 

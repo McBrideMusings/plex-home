@@ -1,8 +1,9 @@
 """CLI subcommand parsing, dispatch, and output for the home-screen tool (ADR-0005).
 
 Defines the ``list`` / ``pin`` / ``unpin`` / ``move`` commands over the imperative
-``hubs`` layer. ``run`` (the daemon) and ``once`` (a single forced reconcile) are
-parsed here but dispatched in ``main``, which owns the cycle they both drive.
+``hubs`` layer, and ``tags`` over plex-db-ex's snapshot (``tagsource``). ``run`` (the
+daemon) and ``once`` (a single forced reconcile) are parsed here but dispatched in
+``main``, which owns the cycle they both drive.
 """
 from __future__ import annotations
 import argparse
@@ -14,11 +15,24 @@ from plexapi.server import PlexServer
 
 from . import hubs
 from . import simulate
+from . import tagsource
 from .config import Config, load_config
 from .hubs import HubError
 from .plex_client import fetch_collections
 
 log = logging.getLogger("plex_home")
+
+
+#: Rows ``tags`` prints as text when ``--limit`` is not given. ``--json`` has no
+#: default cap, since a program reading it wants every row.
+TEXT_ROW_LIMIT = 50
+
+
+def _positive_int(value: str) -> int:
+    n = int(value)
+    if n <= 0:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got {value}")
+    return n
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -69,6 +83,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_sim.add_argument("--start", help="Sim start as YYYY-MM-DD or ISO 8601, read in cadence.timezone (default: now)")
     p_sim.add_argument("--seed", type=int, default=0, help="RNG seed for reproducible picks (default: 0)")
     p_sim.add_argument("--out", default="simulation_report.txt", help="Report file to write (default: simulation_report.txt)")
+
+    p_tags = sub.add_parser(
+        "tags",
+        help="Query plex-db-ex's tag and watch data (reads the snapshot, never Plex)",
+    )
+    tags_sub = p_tags.add_subparsers(dest="tags_command", required=True)
+    t_query = tags_sub.add_parser("query", help="Titles carrying every given tag")
+    t_query.add_argument("tags", nargs="+", help="Tag(s), any spelling plex-db-ex recorded")
+    t_query.add_argument("--kind", choices=tagsource.KINDS, help="Limit to movies or shows")
+    t_related = tags_sub.add_parser("related", help="Tags most often carried alongside a tag")
+    t_related.add_argument("tag")
+    t_related.add_argument("--kind", choices=tagsource.KINDS, required=True)
+    t_plays = tags_sub.add_parser("plays", help="Most-played titles (episodes rolled up to shows)")
+    t_plays.add_argument("--min-seconds", type=int, default=0, help="Drop plays known to be shorter (default: 0)")
+    for p in (t_query, t_related, t_plays):
+        p.add_argument("--limit", type=_positive_int,
+                       help=f"Rows to print (default: {TEXT_ROW_LIMIT} as text, all with --json)")
+        p.add_argument("--json", action="store_true", dest="as_json", help="Machine-readable output")
 
     return parser
 
@@ -191,6 +223,52 @@ def cmd_simulate(plex: PlexServer, config: Config, args) -> int:
     out = Path(args.out)
     out.write_text(report, encoding="utf-8")
     print(f"Wrote simulation report:\n{out.resolve()}")
+    return 0
+
+
+def cmd_tags(config: Config, args) -> int:
+    """``tags query|related|plays`` — read plex-db-ex's snapshot; no Plex connection."""
+    if config.plexdb_snapshot is None:
+        raise tagsource.TagSourceError("No plexdb_snapshot set in the config")
+    limit = args.limit or (None if args.as_json else TEXT_ROW_LIMIT)
+    source = tagsource.SnapshotTagSource(config.plexdb_snapshot)
+    try:
+        if args.tags_command == "query":
+            titles = source.titles_for_tags(args.tags, kind=args.kind)
+            rows = [
+                {"item_id": t.item_id, "title": t.title, "year": t.year, "kind": t.kind,
+                 "plex_keys": [{"section_id": s, "rating_key": k} for s, k in t.plex_keys]}
+                for t in titles
+            ]
+            text = [f"{r['title']} ({r['year']}) [{r['kind']}] "
+                    f"{', '.join(k['rating_key'] for k in r['plex_keys'])}" for r in rows]
+            total = len(rows)
+        elif args.tags_command == "related":
+            pairs = source.co_tags(args.tag, args.kind)
+            rows = [{"tag": tag, "shared": shared} for tag, shared in pairs]
+            text = [f"{r['shared']:>5}  {r['tag']}" for r in rows]
+            total = len(rows)
+        else:
+            counts = source.play_counts(args.min_seconds)
+            top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+            info = source.describe([item_id for item_id, _ in top])
+            rows = [
+                {"item_id": item_id, "title": info[item_id][0], "year": info[item_id][1],
+                 "kind": info[item_id][2], "plays": n}
+                for item_id, n in top
+            ]
+            text = [f"{r['plays']:>5}  {r['title']} ({r['year']}) [{r['kind']}]" for r in rows]
+            total = len(counts)
+    finally:
+        source.close()
+
+    if args.as_json:
+        print(json.dumps({"total": total, "rows": rows[:limit]}, indent=2))
+        return 0
+    shown = text[:limit]
+    print(f"{total} result(s){f', showing {len(shown)}' if len(shown) < total else ''}")
+    for line in shown:
+        print(f"  {line}")
     return 0
 
 

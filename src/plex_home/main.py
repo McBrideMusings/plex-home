@@ -15,6 +15,7 @@ from .resolver import resolve_slots, ResolvedPin
 from .pinning import apply_pins
 from .ordering import apply_order
 from .webhook import send_webhook
+from .tagsource import TagSourceError
 
 log = logging.getLogger("plex_home")
 
@@ -156,6 +157,20 @@ def _run_command(args) -> int:
         return 1
 
 
+def _run_tags(args) -> int:
+    """Dispatch ``tags``, which reads plex-db-ex's snapshot and never connects to Plex."""
+    try:
+        config = load_config(args.config)
+    except ConfigError as e:
+        log.error("Config error: %s", e)
+        return 2
+    try:
+        return cli.cmd_tags(config, args)
+    except TagSourceError as e:
+        log.error("%s", e)
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO,
@@ -166,6 +181,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_daemon(args.config)
     if args.command == "once":
         return run_once(args.config)
+    if args.command == "tags":
+        return _run_tags(args)
     return _run_command(args)
 
 

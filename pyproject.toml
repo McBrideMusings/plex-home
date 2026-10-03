@@ -15,6 +15,9 @@ dependencies = [
     # ship; this is the pure-Python fallback it looks up when that is missing, so
     # cadence.timezone resolves the same in Docker as on a dev machine.
     "tzdata",
+    # plex-db-ex stems every keyword it stores with this; tagsource applies the
+    # same stemmer to a caller's tag so "Heists" matches the stored "heist".
+    "snowballstemmer>=3.1.1",
 ]
 
 [project.scripts]

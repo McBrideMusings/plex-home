@@ -97,6 +97,7 @@ home:
 | `groups` | Named collection groups a `pick` slot draws from — each with optional `date`/`time`/`include_labels`/`include_collections`/`exclude_labels`/`exclude_collections` and per-group cadence overrides. A group carries **no** library; its library is the `home` section that references it (so the same group may be reused under more than one library). |
 | `home` | Mapping of **library name → ordered list of slots**; each slot is `{collection: "<title>"}` (any managed hub by title — collection or system) or `{pick: [<group>, ...]}` (collections only). Every key must be one of `library_names`. |
 | `webhook_url` | Optional; POSTs a per-cycle summary of pinned titles |
+| `plexdb_snapshot` | Optional; path to plex-db-ex's published snapshot, resolved against the config file's directory and read by `plex-home tags`. Never opened at load |
 
 ### Group filters — `include_*` and `exclude_*`
 
