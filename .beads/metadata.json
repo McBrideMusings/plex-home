@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "plex_home",
+  "project_id": "bd2c4905-26c3-4efb-bb63-ad40124b3548"
+}
