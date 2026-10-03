@@ -202,6 +202,9 @@ class SnapshotTagSource:
     def play_counts(self, min_seconds: int = 0) -> dict[str, int]:
         """Plays per title (episodes rolled up to their show), keyed by ``item_id``.
 
+        An episode whose show has no ``items`` row keeps its own id, so every key
+        returned is a real ``items`` row.
+
         A play whose ``seconds_watched`` is known and below ``min_seconds`` is
         dropped; a null ``seconds_watched`` (Plex-only history) always counts.
         """
@@ -209,9 +212,10 @@ class SnapshotTagSource:
             raise TagSourceError(f"min_seconds must be >= 0, got {min_seconds}")
         rows = self._query(
             """
-            SELECT COALESCE(i.show_item_id, p.item_id) AS title_id, COUNT(*)
+            SELECT COALESCE(s.item_id, p.item_id) AS title_id, COUNT(*)
             FROM plays p
             JOIN items i ON i.item_id = p.item_id
+            LEFT JOIN items s ON s.item_id = i.show_item_id
             WHERE p.seconds_watched IS NULL OR p.seconds_watched >= ?
             GROUP BY title_id
             """,

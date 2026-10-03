@@ -119,6 +119,20 @@ def test_play_counts_roll_up_episodes_and_apply_floor_to_known_durations(source)
     assert source.play_counts(min_seconds=30) == {"imdb:heat": 2, "tvdb:leverage": 2}
 
 
+def test_play_on_episode_of_missing_show_stays_on_the_episode(snapshot):
+    db = sqlite3.connect(snapshot)
+    db.execute("INSERT INTO items (item_id, type, title, show_item_id) VALUES ('tvdb:orphan-e1', 'episode', 'Pilot', 'tvdb:gone')")
+    db.execute("INSERT INTO plays (history_key, item_id, plex_account_id, viewed_at) VALUES ('h9', 'tvdb:orphan-e1', 1, 0)")
+    db.commit()
+    db.close()
+    s = SnapshotTagSource(snapshot)
+    counts = s.play_counts()
+    assert counts["tvdb:orphan-e1"] == 1
+    assert "tvdb:gone" not in counts
+    assert set(s.describe(list(counts))) == set(counts)
+    s.close()
+
+
 def test_missing_snapshot_is_a_clear_error(tmp_path):
     with pytest.raises(TagSourceError, match="not found"):
         SnapshotTagSource(tmp_path / "nope.db")
