@@ -22,6 +22,7 @@ CREATE TABLE plays (history_key TEXT PRIMARY KEY, item_id TEXT NOT NULL,
     viewed_at INTEGER NOT NULL, ip TEXT, percent_complete INTEGER, paused_counter INTEGER,
     seconds_watched INTEGER, tautulli_id INTEGER);
 CREATE TABLE tag_network_edge (kind TEXT, a TEXT, b TEXT, shared INTEGER, PRIMARY KEY (kind, a, b));
+CREATE TABLE keyword_forms (surface TEXT PRIMARY KEY, keyword TEXT NOT NULL);
 """
 
 
@@ -67,6 +68,12 @@ def build_snapshot(path):
         ("movie", "dream", "heist", 1),
         ("show", "heist", "revenge", 5),
     ])
+    # "Dreamy" records a stored form the local stemmer would not produce
+    # ("dreami"), standing in for a plex-db-ex stemmer change not copied here.
+    db.executemany("INSERT INTO keyword_forms VALUES (?,?)", [
+        ("heist", "heist"),
+        ("Dreamy", "dream"),
+    ])
     db.commit()
     db.close()
     return path
@@ -101,8 +108,22 @@ def test_titles_for_tags_filters_by_kind(source):
 
 
 def test_normalize_keyword_matches_plex_db_ex_stored_form():
+    # Spellings from plex-db-ex's keywords.py docs; a stemmer bump that changes
+    # any of these fails here instead of silently missing stored keywords.
+    assert normalize_keyword("Heists") == "heist"
+    assert normalize_keyword("bank-heist") == "bank heist"
     assert normalize_keyword("  Bank-Heists ") == "bank heist"
     assert normalize_keyword("time_travel") == "time travel"
+
+
+def test_resolve_tag_prefers_keyword_forms_over_the_local_stemmer(source):
+    assert normalize_keyword("dreamy") == "dreami"   # the local stemmer diverges
+    assert source.resolve_tag("dreamy") == "dream"   # case-insensitive surface match
+    assert [t.title for t in source.titles_for_tags(["DREAMY"])] == ["Inception"]
+
+
+def test_resolve_tag_falls_back_to_stemmer_for_unrecorded_spelling(source):
+    assert source.resolve_tag("Heists") == "heist"
 
 
 def test_tags_for_title_dedupes_across_sources(source):

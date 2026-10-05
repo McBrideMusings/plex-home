@@ -11,7 +11,9 @@ Two schema facts shape the queries:
 - Keywords live in ``enrichment`` under ``namespace = 'keywords'``, normalized and
   stemmed (``Heists`` is stored as ``heist``). More than one source may list the same
   keyword on the same title, so every rollup reads ``DISTINCT item_id, value``. A
-  caller's spelling goes through the same normalization before it is matched.
+  caller's spelling is looked up in ``keyword_forms`` (raw spelling → stored
+  keyword, written by plex-db-ex's own normalizer) and only stemmed locally when
+  no source ever recorded it.
 - A play's ``item_id`` is an episode for TV, so play counts roll episodes up to their
   show through ``items.show_item_id``. ``seconds_watched`` is null on a Plex-only
   deployment, where Plex records a play only once it is (nearly) finished, so a null
@@ -36,6 +38,7 @@ REQUIRED_COLUMNS = {
     "items": {"item_id", "type", "title", "year", "show_item_id"},
     "plex_items": {"rating_key", "item_id", "section_id"},
     "enrichment": {"item_id", "namespace", "value"},
+    "keyword_forms": {"surface", "keyword"},
     "plays": {"item_id", "seconds_watched"},
     "tag_network_edge": {"kind", "a", "b", "shared"},
 }
@@ -50,7 +53,8 @@ def normalize_keyword(surface: str) -> str:
     """The stored form of a raw keyword spelling — a copy of plex-db-ex's
     ``plexdb.keywords.normalize_keyword``, which defines what ``enrichment``
     holds: lowercase, trim, ``-``/``_`` become spaces, whitespace collapses, and
-    each word is Snowball-English stemmed."""
+    each word is Snowball-English stemmed. ``resolve_tag`` falls back to it only
+    for a spelling ``keyword_forms`` has no row for."""
     text = surface.strip().lower().replace("-", " ").replace("_", " ")
     text = _WHITESPACE_RUN.sub(" ", text).strip()
     if not text:
@@ -130,15 +134,31 @@ class SnapshotTagSource:
     def resolve_tag(self, tag: str) -> str:
         """Map a caller's spelling to the stored keyword (``"Heists"`` → ``"heist"``).
 
-        A tag already stored verbatim wins, since a stored value is already
-        stemmed and stemming it again can change it. Anything else goes through
-        ``normalize_keyword``, the same transform plex-db-ex applies on write.
+        Checked in order, first hit wins:
+
+        1. ``keyword_forms`` — a spelling some source actually used, matched
+           case-insensitively (an exact-case row first). This is plex-db-ex's
+           own normalizer output, so it stays right if their stemmer changes.
+        2. A tag already stored verbatim in ``enrichment``, since a stored value
+           is already stemmed and stemming it again can change it.
+        3. ``normalize_keyword``, the local copy of plex-db-ex's transform, for a
+           spelling no source ever recorded.
         """
-        if self._query(
+        rows = self._query(
+            "SELECT keyword FROM keyword_forms WHERE surface = ? COLLATE NOCASE "
+            "ORDER BY surface = ? DESC, keyword LIMIT 1",
+            (tag, tag),
+        )
+        if rows:
+            resolved, via = rows[0][0], "keyword_forms"
+        elif self._query(
             "SELECT 1 FROM enrichment WHERE namespace = 'keywords' AND value = ? LIMIT 1", (tag,)
         ):
-            return tag
-        return normalize_keyword(tag)
+            resolved, via = tag, "stored"
+        else:
+            resolved, via = normalize_keyword(tag), "stemmer"
+        log.info("tagsource resolve_tag %r -> %r via %s", tag, resolved, via)
+        return resolved
 
     def titles_for_tags(self, tags: Sequence[str], kind: Optional[str] = None) -> list[Title]:
         """Titles Plex holds that carry **every** tag in ``tags``, sorted by title."""
