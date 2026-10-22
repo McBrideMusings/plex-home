@@ -31,14 +31,12 @@ class PinResult:
 
 
 def _resolve_target(section, by_title: dict, title: str):
-    """Resolve a fixed-slot title to ``(hub, owner)``: the live ``ManagedHub`` to
-    promote and the object that must stay referenced while the hub is used.
+    """Resolve a fixed-slot title to the live ``ManagedHub`` to promote.
 
     A hub built by ``Collection.visibility()`` holds only a weak reference to its
     collection, and ``updateVisibility`` re-reads the hub afterwards through that
-    reference. ``owner`` is the collection, returned so the caller keeps it alive
-    for the whole promote; it is ``None`` for a hub listed by the section, whose
-    parent is the section itself.
+    reference. The collection is a temporary here, so the hub carries it as
+    ``_collection`` to stay alive exactly as long as the hub does.
 
     Collection wins on a title collision, and does so even when the collection is
     absent from the managed list (previously removed, or never promoted) while a
@@ -52,12 +50,14 @@ def _resolve_target(section, by_title: dict, title: str):
     """
     hub = by_title.get(title)
     if hub is not None and is_collection(hub):
-        return hub, None
+        return hub
     try:
         coll = section.collection(title)
+        target = coll.visibility()
     except NotFound:
-        return hub, None  # a system hub of this title, or None
-    return coll.visibility(), coll
+        return hub  # a system hub of this title, or None
+    target._collection = coll
+    return target
 
 
 def apply_pins(
@@ -98,7 +98,7 @@ def apply_pins(
         #    it alone — the resolved hub, and only it, is protected.
         kept: set[int] = set()
         for pin in [p for p in resolved if p.library == name]:
-            target, _owner = _resolve_target(section, by_title, pin.title)
+            target = _resolve_target(section, by_title, pin.title)
             if target is None:
                 result.missing.append(pin)
                 log.warning("Resolved hub %r in %r not found in Plex — cannot pin", pin.title, name)
