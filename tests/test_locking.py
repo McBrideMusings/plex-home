@@ -58,8 +58,13 @@ def test_second_process_waits_instead_of_interleaving(tmp_path):
 
     a = ctx.Process(target=_hold_then_append, args=(str(lock), str(out), 0.4, "a"))
     a.start()
-    time.sleep(0.1)
-    b = ctx.Process(target=_hold_then_append, args=(str(lock), str(out), 0.0, "b"))
+    # A spawned process can take longer than any fixed sleep to import and take
+    # the lock; wait until a holds it before starting b.
+    deadline = time.monotonic() + 10
+    while not (out.exists() and "a-start" in out.read_text()):
+        assert time.monotonic() < deadline, "a never took the lock"
+        time.sleep(0.01)
+    b =ctx.Process(target=_hold_then_append, args=(str(lock), str(out), 0.0, "b"))
     b.start()
     a.join(10)
     b.join(10)
