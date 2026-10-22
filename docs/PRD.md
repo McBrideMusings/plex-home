@@ -31,7 +31,7 @@ A declarative YAML config that maps directly to the home screen. The user define
 - **Fully-managed home screen** (ADR-0002): on each run, pin the resolved set and unpin all currently-pinned hubs not in that set. No concept of user-pinned hubs the script leaves alone — the config is total.
 - **Group-scoped global overrides** (ADR-0003): `repeat_block_hours` and `min_items_for_pinning` are top-level globals; any group can override them locally. `repeat_block_hours: 0` bypasses only recency — date, time, label, and name constraints still apply.
 - **No Plex label tracking for ownership**: the prior codebase used a Plex label to distinguish "our" pins from "user" pins. Dropped — fully-managed ownership makes the distinction irrelevant. Run history lives in a local JSON file.
-- **Hub ordering via Move Hub API**: after pinning, call `PUT /hubs/{sectionId}/manage/{hubId}/move` to enforce the declared slot order. This is the key capability the prior tool lacked.
+- **Hub ordering via Move Hub API**: after pinning, call `PUT /hubs/sections/{sectionId}/manage/{identifier}/move` to enforce the declared slot order. This is the key capability the prior tool lacked.
 - **YAML config** (ADR-0004): over JSON for readability with nested mixed-shape structures and inline comments.
 - **Group filtering union semantics**: `include_labels` and `include_collections` within a group are unioned — a collection is eligible if it matches any label OR is explicitly named. `exclude_labels` and `exclude_collections` apply independently (both must pass).
 
@@ -54,4 +54,4 @@ A declarative YAML config that maps directly to the home screen. The user define
 
 - The `pick:` list within a slot is tried top-to-bottom; the first group that is currently eligible (passes date/time constraints) AND has at least one eligible collection (passes label/name filters, repeat-block, min-items) fills the slot. If no group resolves, the slot produces nothing — Plex home screen simply has one fewer row, no blank gap.
 - The config draft lives at `~/.claude/plans/plex-home-config-syntax.yaml` as a reference for the YAML schema implementation.
-- The Plex API reference is indexed at `https://developer.plex.tv/pms/` — Move Hub endpoint is `PUT /hubs/{sectionId}/manage/{hubId}/move`.
+- The Plex API reference is indexed at `https://developer.plex.tv/pms/` — Move Hub endpoint is `PUT /hubs/sections/{sectionId}/manage/{identifier}/move?after={identifier}` (the published reference omits `sections/`; python-plexapi's `ManagedHub.move` sends the working path).
