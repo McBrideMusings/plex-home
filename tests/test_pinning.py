@@ -319,3 +319,38 @@ def test_same_title_across_libraries_managed_independently():
     tv_featured.remove.assert_called_once()        # not resolved for TV → removed
     assert result.unchanged == pins(("Movies", "Featured"))
     assert result.removed == pins(("TV Shows", "Featured"))
+
+
+def test_recreated_hub_survives_reload_with_real_plexapi_objects():
+    """A hub from a real Collection.visibility() reloads through a weak reference
+    to its collection; the promote must keep that collection alive."""
+    import gc
+    from xml.etree import ElementTree as ET
+    from plexapi.collection import Collection
+
+    manage = ET.fromstring(
+        '<MediaContainer><Hub identifier="custom.collection.1.7" title="The Craft"'
+        ' promotedToOwnHome="1" promotedToSharedHome="1" promotedToRecommended="0"/></MediaContainer>'
+    )
+    server = MagicMock()
+    server.query.return_value = manage
+    server._session.post = MagicMock()
+
+    def make_coll(title):
+        gc.collect()
+        return Collection(server, ET.fromstring(
+            f'<Directory ratingKey="7" librarySectionID="1" title="{title}"/>'))
+
+    section = MagicMock()
+    section.managedHubs.return_value = []
+    section.collection.side_effect = make_coll
+    plex = make_plex({"Movies": section})
+
+    # visibility() sees no managed row yet, so it builds an unpromoted hub.
+    empty = ET.fromstring("<MediaContainer/>")
+    server.query.side_effect = [empty] + [manage] * 10
+
+    result = pinning.apply_pins(plex, ["Movies"], pins(("Movies", "The Craft")), {})
+
+    assert result.pinned == pins(("Movies", "The Craft"))
+    assert ("Movies", "The Craft") in result.history
